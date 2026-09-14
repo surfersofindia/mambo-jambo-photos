@@ -223,41 +223,76 @@ const dropZone = $('#adminDropZone');
 dropZone.addEventListener('drop', (event) => selectAdminFiles(event.dataTransfer.files));
 $('#adminWorkspace').addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (!adminFiles.length) return setUploadStatus('Choose at least one JPG or PNG photo before publishing.', true);
-  try {
-    hideProgress();
-    const create = await requestApi('/api/admin/sessions', { method: 'POST', body: JSON.stringify({ title: $('#adminTitle').value, date: $('#adminDate').value, location: $('#adminLocation').value, pricePaise: Math.round(Number($('#adminPrice').value) * 100) }) }, true);
+  if (!adminFiles.length) return setUploadStatus('Choose at least one JPG or PNG photo before publishing.', true);    const create = await requestApi('/api/admin/sessions', { method: 'POST', body: JSON.stringify({ title: $('#adminTitle').value, date: $('#adminDate').value, location: $('#adminLocation').value, pricePaise: Math.round(Number($('#adminPrice').value) * 100) }) }, true);
     
-    let totalBytesUploaded = 0;
-    let totalTimeMs = 0;
     const totalBytes = adminFiles.reduce((acc, file) => acc + file.size, 0);
+    const startTime = performance.now();
+    let fileProgress = new Array(adminFiles.length).fill(0);
     
-    for (let index = 0; index < adminFiles.length; index += 1) {
-      const file = adminFiles[index]; 
-      setUploadStatus(`Processing photo ${index + 1} of ${adminFiles.length}...`);
-      const preview = await watermarkedPreview(file);
-      const form = new FormData(); form.append('file', file); form.append('preview', preview, `${file.name.replace(/\.[^.]+$/, '')}-preview.jpg`);
-      
-      setUploadStatus(`Uploading photo ${index + 1} of ${adminFiles.length}...`);
-      const percentBefore = Math.round((totalBytesUploaded / totalBytes) * 100);
-      updateProgress(percentBefore, 0, 'calculating...');
-      
-      const startTime = performance.now();
-      await requestApi(`/api/admin/sessions/${create.session.id}/photos`, { method: 'POST', body: form }, true);
-      const elapsedMs = performance.now() - startTime;
-      
-      totalTimeMs += elapsedMs;
-      totalBytesUploaded += file.size;
-      
-      const currentSpeed = (file.size / 1024) / (elapsedMs / 1000);
-      const avgSpeed = (totalBytesUploaded / 1024) / (totalTimeMs / 1000);
-      const remainingBytes = totalBytes - totalBytesUploaded;
-      const remainingSeconds = avgSpeed > 0 ? (remainingBytes / 1024) / avgSpeed : 0;
-      
-      const etaText = remainingSeconds > 0 ? `${Math.ceil(remainingSeconds)}s` : 'done';
-      const percentAfter = Math.round((totalBytesUploaded / totalBytes) * 100);
-      updateProgress(percentAfter, Math.round(currentSpeed), etaText);
-    }
+    const uploadPhotoWithProgress = (file, preview, sessionId, index) => {
+      return new Promise((resolve, reject) => {
+        const form = new FormData();
+        form.append('file', file);
+        form.append('preview', preview, `${file.name.replace(/\\.[^.]+$/, '')}-preview.jpg`);
+        
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', apiUrl(`/api/admin/sessions/${sessionId}/photos`));
+        xhr.setRequestHeader('authorization', `Bearer ${sessionStorage.getItem('mj-admin-token') || ''}`);
+        
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            fileProgress[index] = e.loaded;
+            const currentTotalUploaded = fileProgress.reduce((a, b) => a + b, 0);
+            const elapsed = (performance.now() - startTime) / 1000;
+            const avgSpeed = (currentTotalUploaded / 1024) / Math.max(elapsed, 0.1);
+            const remainingBytes = totalBytes - currentTotalUploaded;
+            const remainingSeconds = avgSpeed > 0 ? (remainingBytes / 1024) / avgSpeed : 0;
+            const etaText = remainingSeconds > 0 ? `${Math.ceil(remainingSeconds)}s` : 'almost done...';
+            const percent = Math.round((currentTotalUploaded / totalBytes) * 100);
+            updateProgress(percent, Math.round(avgSpeed), etaText);
+          }
+        };
+        
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            fileProgress[index] = file.size;
+            resolve(JSON.parse(xhr.responseText));
+          } else {
+            reject(new Error(`Upload failed for ${file.name}`));
+          }
+        };
+        xhr.onerror = () => reject(new Error(`Network error during upload of ${file.name}`));
+        xhr.send(form);
+      });
+    };
+
+    setUploadStatus(`Uploading ${adminFiles.length} photos...`);
+    updateProgress(0, 0, 'calculating...');
+    
+    let queue = adminFiles.map((file, index) => ({ file, index }));
+    let active = 0;
+    
+    await new Promise((resolve, reject) => {
+      let isRejected = false;
+      const next = async () => {
+        if (isRejected) return;
+        if (queue.length === 0 && active === 0) return resolve();
+        while (active < 4 && queue.length > 0) {
+          const { file, index } = queue.shift();
+          active++;
+          watermarkedPreview(file).then(preview => {
+            return uploadPhotoWithProgress(file, preview, create.session.id, index);
+          }).then(() => {
+            active--;
+            next();
+          }).catch(err => {
+            if (!isRejected) { isRejected = true; reject(err); }
+          });
+        }
+      };
+      next();
+    });
+
     await requestApi(`/api/admin/sessions/${create.session.id}/publish`, { method: 'POST' }, true);
     adminFiles = []; $('#adminPhotoInput').value = ''; setUploadStatus('Published! Your new photo pack is live and ready for guests.'); await loadSessions();
     window.setTimeout(() => hideProgress(), 2000);
@@ -272,9 +307,10 @@ toggleAdminView.addEventListener('click', () => {
   const isDashboard = adminWorkspace.classList.contains('hidden');
   if (isDashboard) {
     adminDashboard.classList.add('hidden');
-      adminWorkspace.classList.remove('hidden');
-      $('#toggleAdminView').classList.remove('hidden');
+    adminWorkspace.classList.remove('hidden');
+    $('#toggleAdminView').classList.remove('hidden');
     toggleAdminView.textContent = 'View Dashboard';
+    if (dashboardInterval) { clearInterval(dashboardInterval); dashboardInterval = null; }
   } else {
     adminWorkspace.classList.add('hidden');
     adminDashboard.classList.remove('hidden');
@@ -285,16 +321,21 @@ toggleAdminView.addEventListener('click', () => {
 
 $('#refreshDashboard').addEventListener('click', loadDashboard);
 
-async function loadDashboard() {
-  dashboardList.innerHTML = 'Loading...';
+let dashboardInterval = null;
+async function loadDashboard(silent = false) {
+  if (!silent) dashboardList.innerHTML = 'Loading...';
   try {
     const { sessions } = await requestApi('/api/admin/dashboard', {}, true);
     if (!sessions.length) {
       dashboardList.innerHTML = '<p>No sessions found.</p>';
+      if (dashboardInterval) { clearInterval(dashboardInterval); dashboardInterval = null; }
       return;
     }
+    let hasPending = false;
     dashboardList.innerHTML = sessions.map((s) => {
-      const indexedStr = s.indexed_photos === s.total_photos && s.total_photos > 0 ? 'Done' : `${s.indexed_photos || 0} / ${s.total_photos}`;
+      const isDone = s.indexed_photos === s.total_photos && s.total_photos > 0;
+      if (!isDone && s.status !== 'draft') hasPending = true;
+      const indexedStr = isDone ? 'Done' : `${s.indexed_photos || 0} / ${s.total_photos}`;
       return `
         <div class="dashboard-card">
           <div class="dashboard-card-head">
@@ -308,8 +349,15 @@ async function loadDashboard() {
         </div>
       `;
     }).join('');
+    
+    if (hasPending && !dashboardInterval) {
+      dashboardInterval = setInterval(() => loadDashboard(true), 4000);
+    } else if (!hasPending && dashboardInterval) {
+      clearInterval(dashboardInterval);
+      dashboardInterval = null;
+    }
   } catch (err) {
-    dashboardList.innerHTML = `<p style="color:var(--coral)">${err.message}</p>`;
+    if (!silent) dashboardList.innerHTML = `<p style="color:var(--coral)">${err.message}</p>`;
   }
 }
 
