@@ -53,7 +53,7 @@ document.querySelectorAll('[data-tilt]').forEach((card) => {
 
 async function requestApi(path, options = {}, admin = false) {
   if (!isLive) throw new Error('The live API is not configured yet. Add the deployed Worker URL to config.js.');
-  const headers = { ...(options.body instanceof FormData ? {} : { 'content-type': 'application/json' }), ...(options.headers || {}) };
+  const headers = { ...(typeof options.body === 'string' ? { 'content-type': 'application/json' } : {}), ...(options.headers || {}) };
   if (admin) headers.authorization = `Bearer ${sessionStorage.getItem('mj-admin-token') || ''}`;
   const response = await fetch(apiUrl(path), { ...options, headers });
   const body = await response.json().catch(() => ({}));
