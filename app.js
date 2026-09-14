@@ -61,33 +61,7 @@ async function requestApi(path, options = {}, admin = false) {
   return body;
 }
 
-let human;
-let humanLoad;
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script'); script.src = src; script.async = true;
-    script.onload = resolve; script.onerror = () => reject(new Error('Face matching could not load. Check your connection and try again.'));
-    document.head.append(script);
-  });
-}
-async function getHuman() {
-  if (human) return human;
-  if (!humanLoad) {
-    humanLoad = (async () => {
-      if (!window.Human) await loadScript('https://cdn.jsdelivr.net/npm/@vladmandic/human@3.3.6/dist/human.js');
-      const Human = window.Human?.Human || window.Human?.default || window.Human;
-      if (!Human) throw new Error('Face matching library did not load correctly.');
-      human = new Human({
-        backend: 'webgl', modelBasePath: 'https://vladmandic.github.io/human-models/models/', cacheModels: true,
-        face: { enabled: true, detector: { rotation: true, maxDetected: 30, minConfidence: 0.55 }, mesh: { enabled: true }, description: { enabled: true }, iris: { enabled: false }, emotion: { enabled: false }, antispoof: { enabled: false }, liveness: { enabled: false } },
-        body: { enabled: false }, hand: { enabled: false }, object: { enabled: false }, gesture: { enabled: false }, segmentation: { enabled: false },
-      });
-      await human.load();
-      return human;
-    })();
-  }
-  return humanLoad;
-}
+
 function imageFromFile(file) {
   return new Promise((resolve, reject) => {
     const image = new Image(); const url = URL.createObjectURL(file);
@@ -96,11 +70,7 @@ function imageFromFile(file) {
     image.src = url;
   });
 }
-async function facesFromFile(file) {
-  const [recogniser, image] = await Promise.all([getHuman(), imageFromFile(file)]);
-  const result = await recogniser.detect(image);
-  return result.face.filter((face) => Array.isArray(face.embedding) && face.embedding.length >= 64).map((face) => ({ embedding: face.embedding, confidence: face.boxScore || face.score || null }));
-}
+
 async function watermarkedPreview(file) {
   const image = await imageFromFile(file); const max = 1400;
   const scale = Math.min(1, max / Math.max(image.width, image.height));
@@ -148,14 +118,11 @@ selfieInput.addEventListener('change', async (event) => {
   $('#selfiePreview').src = URL.createObjectURL(file);
   try {
     if (isLive) {
-      setUploadMessage('Checking your selfie on this device…');
-      const faces = await facesFromFile(file);
-      if (faces.length !== 1) throw new Error(faces.length ? 'Please use a selfie with only one clearly visible face.' : 'We could not find a clear face. Try a brighter, straight-on selfie.');
-      selfieEmbedding = faces[0].embedding;
+      setUploadMessage('Ready to find matches...');
       await loadSessions();
     } else demoSessionOptions();
     uploadStage.classList.add('hidden'); sessionStage.classList.remove('hidden');
-  } catch (caught) { setUploadMessage(caught.message || 'Could not read that selfie. Please try another image.'); }
+  } catch (caught) { setUploadMessage(caught.message || 'Could not process that selfie. Please try another image.'); }
 });
 sessionOptions.addEventListener('click', (event) => {
   const button = event.target.closest('.session'); if (!button) return;
@@ -166,7 +133,13 @@ $('#findMatches').addEventListener('click', async () => {
   sessionStage.classList.add('hidden'); matchingStage.classList.remove('hidden');
   try {
     if (!isLive) { window.setTimeout(() => showResults(), 1800); return; }
-    const match = await requestApi('/api/match', { method: 'POST', body: JSON.stringify({ sessionId: selectedSession.id, embedding: selfieEmbedding }) });
+    
+    const file = selfieInput.files[0];
+    const form = new FormData();
+    form.append('sessionId', selectedSession.id);
+    form.append('file', file);
+    
+    const match = await requestApi('/api/match', { method: 'POST', body: form });
     showResults(match);
   } catch (caught) { matchingStage.classList.add('hidden'); sessionStage.classList.remove('hidden'); alert(caught.message || 'Could not find your photos. Please try again.'); }
 });
@@ -261,11 +234,11 @@ $('#adminWorkspace').addEventListener('submit', async (event) => {
     
     for (let index = 0; index < adminFiles.length; index += 1) {
       const file = adminFiles[index]; 
-      setUploadStatus(`Indexing photo ${index + 1} of ${adminFiles.length} on this device…`);
-      const [faces, preview] = await Promise.all([facesFromFile(file), watermarkedPreview(file)]);
-      const form = new FormData(); form.append('file', file); form.append('preview', preview, `${file.name.replace(/\.[^.]+$/, '')}-preview.jpg`); form.append('faces', JSON.stringify(faces));
+      setUploadStatus(`Processing photo ${index + 1} of ${adminFiles.length}...`);
+      const preview = await watermarkedPreview(file);
+      const form = new FormData(); form.append('file', file); form.append('preview', preview, `${file.name.replace(/\.[^.]+$/, '')}-preview.jpg`);
       
-      setUploadStatus(`Uploading photo ${index + 1} of ${adminFiles.length} · ${faces.length} face${faces.length === 1 ? '' : 's'} indexed…`);
+      setUploadStatus(`Uploading photo ${index + 1} of ${adminFiles.length}...`);
       const percentBefore = Math.round((totalBytesUploaded / totalBytes) * 100);
       updateProgress(percentBefore, 0, 'calculating...');
       
@@ -290,3 +263,53 @@ $('#adminWorkspace').addEventListener('submit', async (event) => {
     window.setTimeout(() => hideProgress(), 2000);
   } catch (caught) { hideProgress(); setUploadStatus(caught.message || 'The upload did not complete. Your draft session is still private.', true); }
 });
+
+const toggleAdminView = $('#toggleAdminView');
+const adminDashboard = $('#adminDashboard');
+const dashboardList = $('#dashboardList');
+
+toggleAdminView.addEventListener('click', () => {
+  const isDashboard = adminWorkspace.classList.contains('hidden');
+  if (isDashboard) {
+    adminDashboard.classList.add('hidden');
+      adminWorkspace.classList.remove('hidden');
+      $('#toggleAdminView').classList.remove('hidden');
+    toggleAdminView.textContent = 'View Dashboard';
+  } else {
+    adminWorkspace.classList.add('hidden');
+    adminDashboard.classList.remove('hidden');
+    toggleAdminView.textContent = 'New Session';
+    loadDashboard();
+  }
+});
+
+$('#refreshDashboard').addEventListener('click', loadDashboard);
+
+async function loadDashboard() {
+  dashboardList.innerHTML = 'Loading...';
+  try {
+    const { sessions } = await requestApi('/api/admin/dashboard', {}, true);
+    if (!sessions.length) {
+      dashboardList.innerHTML = '<p>No sessions found.</p>';
+      return;
+    }
+    dashboardList.innerHTML = sessions.map((s) => {
+      const indexedStr = s.indexed_photos === s.total_photos && s.total_photos > 0 ? 'Done' : `${s.indexed_photos || 0} / ${s.total_photos}`;
+      return `
+        <div class="dashboard-card">
+          <div class="dashboard-card-head">
+            <span class="dashboard-card-title">${s.title}</span>
+            <span class="dashboard-card-status ${s.status}">${s.status}</span>
+          </div>
+          <div class="dashboard-card-stats">
+            <div><span>Indexed</span><strong>${indexedStr}</strong></div>
+            <div><span>Downloads</span><strong>${s.downloads}</strong></div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    dashboardList.innerHTML = `<p style="color:var(--coral)">${err.message}</p>`;
+  }
+}
+

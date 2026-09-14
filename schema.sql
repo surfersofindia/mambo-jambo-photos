@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS photos (
   preview_key TEXT NOT NULL UNIQUE,
   filename TEXT NOT NULL,
   content_type TEXT NOT NULL,
+  indexing_status TEXT NOT NULL DEFAULT 'pending' CHECK (indexing_status IN ('pending', 'completed', 'failed')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS photos_by_session ON photos(session_id);

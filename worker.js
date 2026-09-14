@@ -101,13 +101,35 @@ async function razorpayOrder(search, env) {
   return result.json();
 }
 
-export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-    if (request.method === 'OPTIONS') return new Response(null, { headers: cors(request, env) });
-    if (!url.pathname.startsWith('/api/')) return error('Not found', request, env, 404);
+async function processFaces(env, photoId, objectKey) {
+  try {
+    const object = await env.PHOTOS.get(objectKey);
+    if (!object) return;
+    const formData = new FormData();
+    formData.append('file', await object.blob(), 'image.jpg');
+    
+    const apiUrl = env.FACE_API_URL || 'http://localhost:8080/extract';
+    const req = await fetch(apiUrl, { method: 'POST', body: formData });
+    
+    if (!req.ok) throw new Error(`Face API error: ${req.status}`);
+    const faces = await req.json();
+    
+    const statements = [env.DB.prepare("UPDATE photos SET indexing_status = 'completed' WHERE id = ?").bind(photoId)];
+    faces.forEach((face) => statements.push(env.DB.prepare('INSERT INTO faces (id, photo_id, embedding_json, confidence) VALUES (?, ?, ?, ?)').bind(id(), photoId, JSON.stringify(face.embedding), Number(face.confidence) || null)));
+    await env.DB.batch(statements);
+  } catch (err) {
+    console.error('Background face extraction failed:', err);
+    await env.DB.prepare("UPDATE photos SET indexing_status = 'failed' WHERE id = ?").bind(photoId).run();
+  }
+}
 
+export default {
+  async fetch(request, env, ctx) {
     try {
+      const url = new URL(request.url);
+      if (request.method === 'OPTIONS') return new Response(null, { headers: cors(request, env) });
+      if (!url.pathname.startsWith('/api/')) return error('Not found', request, env, 404);
+
       if (request.method === 'POST' && url.pathname === '/api/admin/login') {
         const { password } = await request.json();
         if (!env.ADMIN_PASSWORD || !same(password, env.ADMIN_PASSWORD)) return error('Incorrect password.', request, env, 401);
@@ -121,8 +143,19 @@ export default {
       }
 
       if (request.method === 'POST' && url.pathname === '/api/match') {
-        const { sessionId, embedding } = await request.json();
-        if (!sessionId || !Array.isArray(embedding) || embedding.length < 64) return error('A valid face descriptor and session are required.', request, env);
+        const form = await request.formData(); 
+        const sessionId = form.get('sessionId');
+        const file = form.get('file');
+        if (!sessionId || !(file instanceof File)) return error('A valid selfie image and session are required.', request, env);
+        
+        const apiUrl = env.FACE_API_URL || 'http://localhost:8080/extract';
+        const apiForm = new FormData(); apiForm.append('file', file, 'selfie.jpg');
+        const req = await fetch(apiUrl, { method: 'POST', body: apiForm });
+        if (!req.ok) return error('Failed to detect face in selfie.', request, env, 500);
+        const faceResults = await req.json();
+        if (faceResults.length !== 1) return error(faceResults.length ? 'Please use a selfie with only one clearly visible face.' : 'We could not find a clear face. Try a brighter, straight-on selfie.', request, env);
+        
+        const embedding = faceResults[0].embedding;
         const session = await env.DB.prepare("SELECT * FROM sessions WHERE id = ? AND status = 'published'").bind(sessionId).first();
         if (!session) return error('That session is unavailable.', request, env, 404);
         const faces = await env.DB.prepare('SELECT f.photo_id, f.embedding_json FROM faces f JOIN photos p ON p.id = f.photo_id WHERE p.session_id = ?').bind(sessionId).all();
@@ -202,23 +235,42 @@ export default {
         return response({ session }, request, env, 201);
       }
 
+      const dashboard = url.pathname.match(/^\/api\/admin\/dashboard$/);
+      if (request.method === 'GET' && dashboard) {
+        if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
+        const query = `
+          SELECT 
+            s.id, s.title, s.session_date as date, s.location, s.status,
+            COUNT(DISTINCT p.id) as total_photos,
+            SUM(CASE WHEN p.indexing_status = 'completed' THEN 1 ELSE 0 END) as indexed_photos,
+            (SELECT COUNT(*) FROM searches sr WHERE sr.session_id = s.id AND sr.status = 'paid') as downloads
+          FROM sessions s
+          LEFT JOIN photos p ON p.session_id = s.id
+          GROUP BY s.id
+          ORDER BY s.created_at DESC
+          LIMIT 50
+        `;
+        const sessions = await env.DB.prepare(query).all();
+        return response({ sessions: sessions.results }, request, env);
+      }
+
       const upload = url.pathname.match(/^\/api\/admin\/sessions\/([\w-]+)\/photos$/);
       if (request.method === 'POST' && upload) {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
         const sessionId = upload[1]; const session = await env.DB.prepare("SELECT id FROM sessions WHERE id = ? AND status = 'draft'").bind(sessionId).first();
         if (!session) return error('Create a draft session before uploading.', request, env, 404);
-        const form = await request.formData(); const file = form.get('file'); const preview = form.get('preview'); const facesRaw = form.get('faces');
+        const form = await request.formData(); const file = form.get('file'); const preview = form.get('preview');
         if (!(file instanceof File) || !(preview instanceof File) || !file.type.startsWith('image/')) return error('An image and its preview are required.', request, env);
-        const faces = JSON.parse(typeof facesRaw === 'string' ? facesRaw : '[]').filter((face) => Array.isArray(face.embedding) && face.embedding.length >= 64);
         const photoId = id(); const filename = safeFilename(file.name); const objectKey = `sessions/${sessionId}/original/${photoId}-${filename}`; const previewKey = `sessions/${sessionId}/preview/${photoId}.jpg`;
         await Promise.all([
           env.PHOTOS.put(objectKey, file.stream(), { httpMetadata: { contentType: file.type } }),
           env.PHOTOS.put(previewKey, preview.stream(), { httpMetadata: { contentType: 'image/jpeg' } }),
         ]);
-        const statements = [env.DB.prepare('INSERT INTO photos (id, session_id, object_key, preview_key, filename, content_type) VALUES (?, ?, ?, ?, ?, ?)').bind(photoId, sessionId, objectKey, previewKey, filename, file.type)];
-        faces.forEach((face) => statements.push(env.DB.prepare('INSERT INTO faces (id, photo_id, embedding_json, confidence) VALUES (?, ?, ?, ?)').bind(id(), photoId, JSON.stringify(face.embedding), Number(face.confidence) || null)));
-        await env.DB.batch(statements);
-        return response({ photoId, faceCount: faces.length }, request, env, 201);
+        await env.DB.prepare("INSERT INTO photos (id, session_id, object_key, preview_key, filename, content_type, indexing_status) VALUES (?, ?, ?, ?, ?, ?, 'pending')").bind(photoId, sessionId, objectKey, previewKey, filename, file.type).run();
+        
+        ctx.waitUntil(processFaces(env, photoId, objectKey));
+        
+        return response({ photoId, status: 'pending' }, request, env, 201);
       }
 
       const publish = url.pathname.match(/^\/api\/admin\/sessions\/([\w-]+)\/publish$/);
