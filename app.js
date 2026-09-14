@@ -345,6 +345,7 @@ async function loadDashboard(silent = false) {
           <div class="dashboard-card-stats">
             <div><span>Indexed</span><strong>${indexedStr}</strong></div>
             <div><span>Downloads</span><strong>${s.downloads}</strong></div>
+            <div><button class="cta" data-delete="${s.id}" onclick="deleteSession('${s.id}')" style="padding:4px 8px; font-size:10px; background:var(--coral);">Delete</button></div>
           </div>
         </div>
       `;
@@ -358,6 +359,19 @@ async function loadDashboard(silent = false) {
     }
   } catch (err) {
     if (!silent) dashboardList.innerHTML = `<p style="color:var(--coral)">${err.message}</p>`;
+  }
+}
+
+async function deleteSession(id) {
+  if (!confirm('Are you sure you want to completely delete this session and wipe all its photos from storage? This cannot be undone.')) return;
+  const btn = document.querySelector(`button[data-delete="${id}"]`);
+  if (btn) btn.textContent = 'Deleting...';
+  try {
+    await requestApi(`/api/admin/sessions/${id}`, { method: 'DELETE' }, true);
+    loadDashboard();
+  } catch (err) {
+    alert(err.message);
+    if (btn) btn.textContent = 'Delete';
   }
 }
 

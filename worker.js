@@ -254,6 +254,30 @@ export default {
         return response({ sessions: sessions.results }, request, env);
       }
 
+      const deleteSession = url.pathname.match(/^\/api\/admin\/sessions\/([\w-]+)$/);
+      if (request.method === 'DELETE' && deleteSession) {
+        if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
+        const sessionId = deleteSession[1];
+        
+        // Fetch all photos for this session
+        const photos = await env.DB.prepare('SELECT object_key, preview_key FROM photos WHERE session_id = ?').bind(sessionId).all();
+        
+        // Delete all photo files from R2
+        if (photos.results.length > 0) {
+          const keysToDelete = photos.results.flatMap(p => [p.object_key, p.preview_key]);
+          // R2 delete can take an array of keys (up to 1000 at a time, but this handles most cases)
+          const chunks = [];
+          for (let i = 0; i < keysToDelete.length; i += 500) {
+            chunks.push(env.PHOTOS.delete(keysToDelete.slice(i, i + 500)));
+          }
+          await Promise.all(chunks);
+        }
+        
+        // Delete session from DB (cascades to photos and faces due to ON DELETE CASCADE)
+        await env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(sessionId).run();
+        return response({ success: true }, request, env);
+      }
+
       const upload = url.pathname.match(/^\/api\/admin\/sessions\/([\w-]+)\/photos$/);
       if (request.method === 'POST' && upload) {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
