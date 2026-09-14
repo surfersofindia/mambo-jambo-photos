@@ -6,5 +6,5 @@
  * https://mambo-jambo-photo-api.your-account.workers.dev
  */
 window.MJ_CONFIG = {
-  apiUrl: '',
+  apiUrl: 'https://mambo-jambo-photo-api.surfersofindia.workers.dev',
 };
