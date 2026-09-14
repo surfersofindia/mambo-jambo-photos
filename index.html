@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mambo Jambo — Find your wave</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Work+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,500;1,600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="motion.css" />
+    <link rel="stylesheet" href="live.css" />
+  </head>
+  <body>
+    <div class="scroll-progress" aria-hidden="true"><i></i></div>
+    <main>
+      <section class="hero" id="home">
+        <div class="hero-current" aria-hidden="true"><i></i><i></i><i></i></div>
+        <nav data-enter>
+          <a class="brand" href="#home" aria-label="Mambo Jambo Surf School home"><img src="assets/mambo-jambo-logo.png" alt="" /><span>Mambo Jambo<small>Surf School</small></span></a>
+          <div class="nav-links"><a href="#how-it-works">How it works</a><a href="#sessions">Sessions</a></div>
+          <button class="admin-link" id="openAdmin">Admin <span>↗</span></button>
+        </nav>
+
+        <div class="hero-grid">
+          <div class="hero-copy" data-enter data-delay="1">
+            <p class="eyebrow">SURF • SNAP • SMILE</p>
+            <h1>You bring the <em>stoke.</em><br />We’ll find the shots.</h1>
+            <p class="intro">Your surf photos are waiting. Upload a selfie and we’ll match you with every moment from the water.</p>
+            <button class="cta ripple" id="startFinding">Find my photos <span>→</span></button>
+            <p class="microcopy"><span class="spark">✦</span> Your selfie stays on your device. Pay only to unlock your matches.</p>
+          </div>
+          <div class="hero-image tilt-card" data-enter data-delay="2" data-tilt>
+            <picture><source srcset="assets/mambo-jambo-surf-session-portrait.jpg" media="(max-width: 720px)" /><img src="assets/mambo-jambo-surf-session.jpg" alt="Mambo Jambo surf school session in Mulki" /></picture>
+            <div class="photo-tag"><span class="tag-dot"></span> MULKI, KARNATAKA <strong>Today’s lesson</strong></div>
+            <div class="scribble">that one was<br /><b>yours!</b> <span>↗</span></div>
+          </div>
+        </div>
+        <div class="hero-bottom"><span>SCROLL TO DIVE IN</span><span class="wave-mark">〰</span><span>EST. 2015 · SOUTH GOA</span></div>
+      </section>
+
+      <section class="finder" id="finder">
+        <div class="section-heading" data-reveal><p class="eyebrow">THE EASY BIT</p><h2>A selfie is all<br />we <em>need.</em></h2></div>
+        <div class="finder-card" data-reveal data-reveal-delay="1">
+          <div class="steps"><span class="active">01</span><i></i><span>02</span><i></i><span>03</span></div>
+          <div class="upload-stage" id="uploadStage">
+            <div class="upload-icon">⌁</div>
+            <h3>Show us that surf face</h3>
+            <p>Choose a clear selfie — sunglasses off if possible.</p>
+            <label class="consent-row"><input type="checkbox" id="privacyConsent" /><span>I agree that my selfie will be used <strong>only</strong> for face matching. It stays on my device and is never stored.</span></label>
+            <label class="upload-button ripple disabled" for="selfieInput" id="uploadLabel">Upload selfie <span>↑</span></label>
+            <input type="file" id="selfieInput" accept="image/*" hidden disabled />
+            <small>JPG, PNG or HEIC · analysed privately on your device</small>
+          </div>
+          <div class="session-stage hidden" id="sessionStage">
+            <p class="step-label">STEP 02 OF 03</p><h3>When did you surf?</h3>
+            <div class="session-options" id="sessionOptions">
+              <button class="session selected"><span>Today</span><small>Sunday, 14 Sept</small></button>
+              <button class="session"><span>Yesterday</span><small>Saturday, 13 Sept</small></button>
+              <button class="session"><span>Pick a date</span><small>Find an older session</small></button>
+            </div>
+            <button class="match-button ripple" id="findMatches">Find my waves <span>→</span></button>
+          </div>
+          <div class="matching-stage hidden" id="matchingStage">
+            <div class="scan-photo"><img id="selfiePreview" alt="Your selfie" /><span></span></div>
+            <p class="step-label">LOOKING THROUGH TODAY'S SESSION</p><h3>Finding your best waves...</h3><p>Matching your selfie to 842 photos from the lineup.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="how" id="how-it-works">
+        <div class="how-head" data-reveal><p class="eyebrow">NO MORE DIGGING</p><h2>From lineup to<br /><em>your phone.</em></h2></div>
+        <div class="how-steps">
+          <article data-reveal><span>01</span><div class="line-art camera">◉</div><h3>We shoot</h3><p>Our photographers capture every drop, turn and wipeout.</p></article>
+          <article data-reveal data-reveal-delay="1"><span>02</span><div class="line-art face">◡</div><h3>You upload</h3><p>One quick selfie helps our clever matcher spot you in the crowd.</p></article>
+          <article data-reveal data-reveal-delay="2"><span>03</span><div class="line-art heart">♡</div><h3>You relive it</h3><p>Get your full set, save your favourites and share the good stuff.</p></article>
+        </div>
+      </section>
+
+      <section class="sessions" id="sessions">
+        <div data-reveal><p class="eyebrow">RECENT SESSIONS</p><h2>The ocean’s been<br /><em>showing off.</em></h2><a href="#finder">Find photos from a session <span>→</span></a></div>
+        <div class="session-stack tilt-card" data-reveal data-reveal-delay="1" data-tilt><img src="assets/mambo-jambo-surf-session.jpg" alt="Mambo Jambo group surf lesson" /><div><span>SEP 14</span><strong>Morning glass</strong><small>842 photos · Mulki</small></div></div>
+      </section>
+    </main>
+
+    <footer><a class="brand" href="#home"><img src="assets/mambo-jambo-logo.png" alt="" /><span>Mambo Jambo<small>Surf School</small></span></a><p>Made for salty humans.</p><div><a href="#">Instagram</a><a href="#">Contact</a></div></footer>
+
+    <section class="results hidden" id="results">
+      <div class="results-nav"><button id="backHome">← Back to home</button><a class="brand" href="#home"><img src="assets/mambo-jambo-logo.png" alt="" /><span>Mambo Jambo<small>Surf School</small></span></a><div class="results-actions"><button class="unlock-photos ripple" id="unlockPhotos">Unlock full set <span>→</span></button><button class="download-all ripple hidden" id="downloadAll">Download all <span>↓</span></button></div></div>
+      <div class="results-head"><p class="eyebrow" id="resultsMeta">SUNDAY, 14 SEPT · MULKI</p><h2 id="resultsTitle">We found <em>18</em> shots<br />with your name on ’em.</h2><p id="resultsCopy">Your matches are previewed with a watermark. Unlock the set for crisp, full-resolution downloads.</p></div>
+      <div class="gallery" id="gallery"></div>
+    </section>
+
+    <aside class="admin-panel hidden" id="adminPanel">
+      <div class="admin-header"><div><p class="eyebrow">BACKSTAGE</p><h2>Photo drop</h2></div><button id="closeAdmin" aria-label="Close admin panel">×</button></div>
+      <form id="adminLoginForm" class="admin-login"><p>Sign in to prepare a private surf session.</p><label>Admin password<input id="adminPassword" type="password" autocomplete="current-password" required /></label><button class="publish ripple" type="submit">Enter studio <span>→</span></button><small id="adminLoginMessage"></small></form>
+      <form id="adminWorkspace" class="admin-workspace hidden">
+        <div class="admin-meta"><label>Session name<input id="adminTitle" type="text" value="Morning surf" maxlength="80" required /></label><label>Session date<input id="adminDate" type="date" value="2026-09-14" required /></label><label>Beach / break<input id="adminLocation" type="text" value="Mulki Beach" maxlength="80" required /></label><label>Photo-pack price (₹)<input id="adminPrice" type="number" value="299" min="1" step="1" required /></label></div>
+        <div class="admin-upload" id="adminDropZone"><div>↑</div><h3>Drop today’s session here</h3><p>Each photo is indexed in this browser before it uploads. Guests only receive watermarked previews before payment.</p><label class="upload-button ripple" for="adminPhotoInput">Choose photos <span>↑</span></label><input id="adminPhotoInput" type="file" accept="image/*" multiple hidden /></div>
+        <div class="upload-status hidden" id="adminUploadStatus" aria-live="polite"></div>
+        <button class="publish ripple" id="publishSession" type="submit">Publish photo pack <span>→</span></button>
+        <p class="admin-note">This creates private originals, watermarked previews, and local face embeddings. Your guests’ raw selfies are never uploaded.</p>
+      </form>
+    </aside>
+    <div class="overlay hidden" id="overlay"></div>
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

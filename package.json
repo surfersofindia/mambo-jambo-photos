@@ -1,0 +1,12 @@
+{
+  "name": "mambo-jambo-photo-finder",
+  "private": true,
+  "scripts": {
+    "dev:api": "wrangler dev",
+    "deploy:api": "wrangler deploy",
+    "db:apply": "wrangler d1 execute mambo-jambo-photos --remote --file=schema.sql"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
