@@ -233,6 +233,8 @@ $('#adminLoginForm').addEventListener('submit', async (event) => {
 
 let adminFiles = [];
 function setUploadStatus(text, isError = false) { const status = $('#adminUploadStatus'); status.textContent = text; status.classList.remove('hidden'); status.classList.toggle('error', isError); }
+function updateProgress(percent, speed, eta) { const c = $('#adminUploadProgress'); c.classList.add('visible'); c.style.setProperty('--progress', `${percent}%`); $('#adminSpeed').textContent = speed ? `${speed} KB/s` : ''; $('#adminEta').textContent = eta ? `ETA: ${eta}` : ''; }
+function hideProgress() { $('#adminUploadProgress').classList.remove('visible'); }
 function selectAdminFiles(files) { 
   adminFiles = [...files].filter((file) => file.type.startsWith('image/')); 
   setUploadStatus(adminFiles.length ? `${adminFiles.length} photo${adminFiles.length === 1 ? '' : 's'} selected. Scroll down and click "Publish photo pack" to begin uploading.` : 'Choose JPG or PNG photos to continue.', !adminFiles.length); 
@@ -250,15 +252,41 @@ $('#adminWorkspace').addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!adminFiles.length) return setUploadStatus('Choose at least one JPG or PNG photo before publishing.', true);
   try {
+    hideProgress();
     const create = await requestApi('/api/admin/sessions', { method: 'POST', body: JSON.stringify({ title: $('#adminTitle').value, date: $('#adminDate').value, location: $('#adminLocation').value, pricePaise: Math.round(Number($('#adminPrice').value) * 100) }) }, true);
+    
+    let totalBytesUploaded = 0;
+    let totalTimeMs = 0;
+    const totalBytes = adminFiles.reduce((acc, file) => acc + file.size, 0);
+    
     for (let index = 0; index < adminFiles.length; index += 1) {
-      const file = adminFiles[index]; setUploadStatus(`Indexing photo ${index + 1} of ${adminFiles.length} on this device…`);
+      const file = adminFiles[index]; 
+      setUploadStatus(`Indexing photo ${index + 1} of ${adminFiles.length} on this device…`);
       const [faces, preview] = await Promise.all([facesFromFile(file), watermarkedPreview(file)]);
       const form = new FormData(); form.append('file', file); form.append('preview', preview, `${file.name.replace(/\.[^.]+$/, '')}-preview.jpg`); form.append('faces', JSON.stringify(faces));
+      
       setUploadStatus(`Uploading photo ${index + 1} of ${adminFiles.length} · ${faces.length} face${faces.length === 1 ? '' : 's'} indexed…`);
+      const percentBefore = Math.round((totalBytesUploaded / totalBytes) * 100);
+      updateProgress(percentBefore, 0, 'calculating...');
+      
+      const startTime = performance.now();
       await requestApi(`/api/admin/sessions/${create.session.id}/photos`, { method: 'POST', body: form }, true);
+      const elapsedMs = performance.now() - startTime;
+      
+      totalTimeMs += elapsedMs;
+      totalBytesUploaded += file.size;
+      
+      const currentSpeed = (file.size / 1024) / (elapsedMs / 1000);
+      const avgSpeed = (totalBytesUploaded / 1024) / (totalTimeMs / 1000);
+      const remainingBytes = totalBytes - totalBytesUploaded;
+      const remainingSeconds = avgSpeed > 0 ? (remainingBytes / 1024) / avgSpeed : 0;
+      
+      const etaText = remainingSeconds > 0 ? `${Math.ceil(remainingSeconds)}s` : 'done';
+      const percentAfter = Math.round((totalBytesUploaded / totalBytes) * 100);
+      updateProgress(percentAfter, Math.round(currentSpeed), etaText);
     }
     await requestApi(`/api/admin/sessions/${create.session.id}/publish`, { method: 'POST' }, true);
     adminFiles = []; $('#adminPhotoInput').value = ''; setUploadStatus('Published! Your new photo pack is live and ready for guests.'); await loadSessions();
-  } catch (caught) { setUploadStatus(caught.message || 'The upload did not complete. Your draft session is still private.', true); }
+    window.setTimeout(() => hideProgress(), 2000);
+  } catch (caught) { hideProgress(); setUploadStatus(caught.message || 'The upload did not complete. Your draft session is still private.', true); }
 });

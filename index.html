@@ -98,6 +98,16 @@
         <div class="admin-meta"><label>Session name<input id="adminTitle" type="text" value="Morning surf" maxlength="80" required /></label><label>Session date<input id="adminDate" type="date" value="2026-09-14" required /></label><label>Beach / break<input id="adminLocation" type="text" value="Mulki Beach" maxlength="80" required /></label><label>Photo-pack price (₹)<input id="adminPrice" type="number" value="299" min="1" step="1" required /></label></div>
         <div class="admin-upload" id="adminDropZone"><div>↑</div><h3>Drop today’s session here</h3><p>Each photo is indexed in this browser before it uploads. Guests only receive watermarked previews before payment.</p><label class="upload-button ripple" for="adminPhotoInput">Choose photos <span>↑</span></label><input id="adminPhotoInput" type="file" accept="image/*" multiple hidden /></div>
         <div class="upload-status hidden" id="adminUploadStatus" aria-live="polite"></div>
+        <div class="surf-progress-container" id="adminUploadProgress">
+          <div class="surf-track">
+            <div class="surf-wave" id="adminWave"></div>
+            <div class="surfboard" id="adminSurfboard">🏄</div>
+          </div>
+          <div class="progress-stats">
+            <span id="adminSpeed">0 KB/s</span>
+            <span id="adminEta">ETA: --</span>
+          </div>
+        </div>
         <button class="publish ripple" id="publishSession" type="submit">Publish photo pack <span>→</span></button>
         <p class="admin-note">This creates private originals, watermarked previews, and local face embeddings. Your guests’ raw selfies are never uploaded.</p>
       </form>
