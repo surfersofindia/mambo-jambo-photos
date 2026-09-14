@@ -240,6 +240,7 @@ function selectAdminFiles(files) {
     window.setTimeout(() => $('#publishSession').scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
   }
 }
+$('#adminPhotoInput').addEventListener('click', (event) => { event.target.value = null; });
 $('#adminPhotoInput').addEventListener('change', (event) => selectAdminFiles(event.target.files));
 const dropZone = $('#adminDropZone');
 ['dragenter', 'dragover'].forEach((type) => dropZone.addEventListener(type, (event) => { event.preventDefault(); dropZone.classList.add('dragging'); }));
