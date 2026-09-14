@@ -277,7 +277,7 @@ $('#adminWorkspace').addEventListener('submit', async (event) => {
       const next = async () => {
         if (isRejected) return;
         if (queue.length === 0 && active === 0) return resolve();
-        while (active < 4 && queue.length > 0) {
+        while (active < 10 && queue.length > 0) {
           const { file, index } = queue.shift();
           active++;
           watermarkedPreview(file).then(preview => {
