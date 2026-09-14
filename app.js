@@ -233,7 +233,13 @@ $('#adminLoginForm').addEventListener('submit', async (event) => {
 
 let adminFiles = [];
 function setUploadStatus(text, isError = false) { const status = $('#adminUploadStatus'); status.textContent = text; status.classList.remove('hidden'); status.classList.toggle('error', isError); }
-function selectAdminFiles(files) { adminFiles = [...files].filter((file) => file.type.startsWith('image/')); setUploadStatus(adminFiles.length ? `${adminFiles.length} photo${adminFiles.length === 1 ? '' : 's'} selected. They will be indexed on this device before upload.` : 'Choose JPG or PNG photos to continue.', !adminFiles.length); }
+function selectAdminFiles(files) { 
+  adminFiles = [...files].filter((file) => file.type.startsWith('image/')); 
+  setUploadStatus(adminFiles.length ? `${adminFiles.length} photo${adminFiles.length === 1 ? '' : 's'} selected. Scroll down and click "Publish photo pack" to begin uploading.` : 'Choose JPG or PNG photos to continue.', !adminFiles.length); 
+  if (adminFiles.length > 0) {
+    window.setTimeout(() => $('#publishSession').scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+  }
+}
 $('#adminPhotoInput').addEventListener('change', (event) => selectAdminFiles(event.target.files));
 const dropZone = $('#adminDropZone');
 ['dragenter', 'dragover'].forEach((type) => dropZone.addEventListener(type, (event) => { event.preventDefault(); dropZone.classList.add('dragging'); }));
