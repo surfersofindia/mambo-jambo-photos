@@ -16,6 +16,7 @@ function dateLabel(value) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 function stage(name) {
+  $('#privacyConsent').disabled = name !== 'selfie';
   for (const value of ['session', 'selfie', 'matching']) $(`#${value}Stage`).hidden = value !== name;
   $('#step1').classList.toggle('active', name === 'session');
   $('#step2').classList.toggle('active', name === 'selfie');
