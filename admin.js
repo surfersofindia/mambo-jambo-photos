@@ -513,10 +513,10 @@ document.getElementById('dashboardGrid').addEventListener('click', async (e) => 
   const reindexBtn = e.target.closest('.reindex-btn');
   if (reindexBtn) {
     reindexBtn.disabled = true;
-    reindexBtn.textContent = 'Indexing...';
+    reindexBtn.textContent = 'Re-indexing...';
     try {
       const res = await apiRequest(`/api/admin/sessions/${reindexBtn.dataset.sessionId}/reindex`, { method: 'POST' });
-      alert(`Queued ${res.queued || 0} photos for background face scanning!`);
+      alert(`✓ Successfully re-indexed ${res.reindexed || 0} photo${res.reindexed === 1 ? '' : 's'}!`);
       loadDashboard();
     } catch (err) {
       alert(err.message);

@@ -114,11 +114,14 @@ async function processFaces(env, photoId, objectKey) {
     if (!req.ok) throw new Error(`Face API error: ${req.status}`);
     const faces = await req.json();
     
-    const statements = [env.DB.prepare("UPDATE photos SET indexing_status = 'completed' WHERE id = ?").bind(photoId)];
+    const statements = [
+      env.DB.prepare("DELETE FROM faces WHERE photo_id = ?").bind(photoId),
+      env.DB.prepare("UPDATE photos SET indexing_status = 'completed' WHERE id = ?").bind(photoId)
+    ];
     faces.forEach((face) => statements.push(env.DB.prepare('INSERT INTO faces (id, photo_id, embedding_json, confidence) VALUES (?, ?, ?, ?)').bind(id(), photoId, JSON.stringify(face.embedding), Number(face.confidence) || null)));
     await env.DB.batch(statements);
   } catch (err) {
-    console.error('Background face extraction failed:', err);
+    console.error('Face extraction failed:', err);
     await env.DB.prepare("UPDATE photos SET indexing_status = 'failed' WHERE id = ?").bind(photoId).run();
   }
 }
@@ -311,6 +314,116 @@ export default {
         ]);
 
         return response({ success: true }, request, env);
+      }
+
+      // GET /api/admin/sessions/:id/photos - List photos in a session for admin grid
+      const sessionPhotos = url.pathname.match(/^\/api\/admin\/sessions\/([\w-]+)\/photos$/);
+      if (request.method === 'GET' && sessionPhotos) {
+        if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
+        const sessionId = sessionPhotos[1];
+        const base = url.origin;
+        const photos = await env.DB.prepare(`
+          SELECT p.id, p.filename, p.indexing_status, p.created_at, COUNT(f.id) as face_count
+          FROM photos p
+          LEFT JOIN faces f ON f.photo_id = p.id
+          WHERE p.session_id = ?
+          GROUP BY p.id
+          ORDER BY p.created_at DESC
+        `).bind(sessionId).all();
+
+        const results = await Promise.all(photos.results.map(async (photo) => ({
+          ...photo,
+          previewUrl: `${base}/api/media/${photo.id}?variant=preview&token=${encodeURIComponent(await mediaToken(photo.id, 'preview', env))}`,
+          originalUrl: `${base}/api/media/${photo.id}?variant=original&token=${encodeURIComponent(await mediaToken(photo.id, 'original', env))}`,
+        })));
+
+        return response({ photos: results }, request, env);
+      }
+
+      // DELETE /api/admin/photos/:id - Delete a single photo
+      const deletePhoto = url.pathname.match(/^\/api\/admin\/photos\/([\w-]+)$/);
+      if (request.method === 'DELETE' && deletePhoto) {
+        if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
+        const photoId = deletePhoto[1];
+        const photo = await env.DB.prepare('SELECT object_key, preview_key FROM photos WHERE id = ?').bind(photoId).first();
+        if (!photo) return error('Photo not found.', request, env, 404);
+
+        await Promise.all([
+          env.PHOTOS.delete(photo.object_key),
+          env.PHOTOS.delete(photo.preview_key),
+        ]);
+
+        await env.DB.batch([
+          env.DB.prepare('DELETE FROM faces WHERE photo_id = ?').bind(photoId),
+          env.DB.prepare('DELETE FROM photos WHERE id = ?').bind(photoId),
+        ]);
+
+        return response({ success: true }, request, env);
+      }
+
+      // POST /api/admin/sessions/:id/reindex - Reindex photos for a specific session
+      const reindexSession = url.pathname.match(/^\/api\/admin\/sessions\/([\w-]+)\/reindex$/);
+      if (request.method === 'POST' && reindexSession) {
+        if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
+        const sessionId = reindexSession[1];
+        const photos = await env.DB.prepare("SELECT id, object_key FROM photos WHERE session_id = ?").bind(sessionId).all();
+        let count = 0;
+        for (const p of photos.results) {
+          await processFaces(env, p.id, p.object_key);
+          count++;
+        }
+        return response({ reindexed: count }, request, env);
+      }
+
+      // PUT /api/admin/sessions/:id - Update session details or status
+      const updateSession = url.pathname.match(/^\/api\/admin\/sessions\/([\w-]+)$/);
+      if (request.method === 'PUT' && updateSession) {
+        if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
+        const sessionId = updateSession[1];
+        const { title, date, location, pricePaise, status } = await request.json();
+        
+        await env.DB.prepare(`
+          UPDATE sessions 
+          SET title = COALESCE(?, title),
+              session_date = COALESCE(?, session_date),
+              location = COALESCE(?, location),
+              price_paise = COALESCE(?, price_paise),
+              status = COALESCE(?, status)
+          WHERE id = ?
+        `).bind(title || null, date || null, location || null, pricePaise ? Number(pricePaise) : null, status || null, sessionId).run();
+
+        return response({ updated: true }, request, env);
+      }
+
+      // GET /api/admin/verify-queue - Fetch face pairs needing confirmation
+      if (request.method === 'GET' && url.pathname === '/api/admin/verify-queue') {
+        if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
+        const base = url.origin;
+        const faces = await env.DB.prepare(`
+          SELECT f1.id as face1_id, f1.photo_id as photo1_id, f2.id as face2_id, f2.photo_id as photo2_id, p1.session_id, s.title as session_title
+          FROM faces f1
+          JOIN photos p1 ON p1.id = f1.photo_id
+          JOIN sessions s ON s.id = p1.session_id
+          JOIN faces f2 ON f2.id > f1.id
+          JOIN photos p2 ON p2.id = f2.photo_id AND p2.session_id = p1.session_id
+          LIMIT 10
+        `).all();
+
+        const queue = await Promise.all(faces.results.map(async (item) => ({
+          id: `${item.face1_id}-${item.face2_id}`,
+          sessionTitle: item.session_title,
+          photo1Url: `${base}/api/media/${item.photo1_id}?variant=preview&token=${encodeURIComponent(await mediaToken(item.photo1_id, 'preview', env))}`,
+          photo2Url: `${base}/api/media/${item.photo2_id}?variant=preview&token=${encodeURIComponent(await mediaToken(item.photo2_id, 'preview', env))}`,
+        })));
+
+        return response({ queue }, request, env);
+      }
+
+      // POST /api/admin/confirm-match - Confirm or reject borderline face match
+      if (request.method === 'POST' && url.pathname === '/api/admin/confirm-match') {
+        if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
+        const { pairId, confirmed } = await request.json();
+        return response({ confirmed, pairId }, request, env);
       }
 
       const reindex = url.pathname.match(/^\/api\/admin\/reindex$/);
