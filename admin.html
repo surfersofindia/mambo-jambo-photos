@@ -60,7 +60,9 @@
         letter-spacing: -.6px;
         color: var(--text);
         text-decoration: none;
+        transition: opacity .2s ease, transform .2s ease;
       }
+      .topbar-brand:hover { opacity: 0.9; transform: translateY(-1px); }
       .topbar-brand img { height: 36px; width: 36px; object-fit: contain; }
       .topbar-brand small {
         display: block;
@@ -77,21 +79,25 @@
         letter-spacing: 1px;
         color: var(--muted);
         text-decoration: none;
-        transition: color .2s;
+        padding: 6px 12px;
+        border-radius: 4px;
+        transition: color .2s ease, background .2s ease;
       }
-      .back-link:hover { color: var(--text); }
+      .back-link:hover { color: var(--text); background: rgba(255, 255, 255, 0.05); }
       .sign-out-btn {
         background: none;
         color: var(--muted);
         font: 10px var(--mono);
         text-transform: uppercase;
         letter-spacing: 1px;
-        padding: 6px 12px;
+        padding: 6px 14px;
         border: 1px solid var(--border);
-        border-radius: 4px;
-        transition: color .2s, border-color .2s;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: color .2s ease, border-color .2s ease, background .2s ease, transform .15s ease;
       }
-      .sign-out-btn:hover { color: var(--coral); border-color: var(--coral); }
+      .sign-out-btn:hover { color: var(--coral); border-color: var(--coral); background: rgba(208, 96, 80, 0.1); transform: translateY(-1px); }
+      .sign-out-btn:active { transform: translateY(0); }
 
       /* ── Layout ── */
       .admin-body {
