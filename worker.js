@@ -294,7 +294,6 @@ export default {
         // Delete all photo files from R2
         if (photos.results.length > 0) {
           const keysToDelete = photos.results.flatMap(p => [p.object_key, p.preview_key]);
-          // R2 delete can take an array of keys (up to 1000 at a time, but this handles most cases)
           const chunks = [];
           for (let i = 0; i < keysToDelete.length; i += 500) {
             chunks.push(env.PHOTOS.delete(keysToDelete.slice(i, i + 500)));
@@ -302,8 +301,15 @@ export default {
           await Promise.all(chunks);
         }
         
-        // Delete session from DB (cascades to photos and faces due to ON DELETE CASCADE)
-        await env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(sessionId).run();
+        // Delete all DB records in correct dependency order to prevent foreign key errors
+        await env.DB.batch([
+          env.DB.prepare('DELETE FROM payments WHERE search_id IN (SELECT id FROM searches WHERE session_id = ?)').bind(sessionId),
+          env.DB.prepare('DELETE FROM searches WHERE session_id = ?').bind(sessionId),
+          env.DB.prepare('DELETE FROM faces WHERE photo_id IN (SELECT id FROM photos WHERE session_id = ?)').bind(sessionId),
+          env.DB.prepare('DELETE FROM photos WHERE session_id = ?').bind(sessionId),
+          env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(sessionId),
+        ]);
+
         return response({ success: true }, request, env);
       }
 
