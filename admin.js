@@ -578,6 +578,19 @@ document.getElementById('refreshBtn').addEventListener('click', () => loadDashbo
 
 // ── Crew Match Verification Queue ─────────────────────────────────────────────
 
+function getFaceCropStyle(bboxNorm) {
+  if (!bboxNorm || !Array.isArray(bboxNorm) || bboxNorm.length !== 4) {
+    return 'object-fit: cover; object-position: center 25%; transform: scale(1.6);';
+  }
+  const [top, left, width, height] = bboxNorm;
+  const centerX = left + (width / 2);
+  const centerY = top + (height / 2);
+  const maxDim = Math.max(width, height, 6);
+  const zoom = Math.min(Math.max(100 / maxDim, 2.2), 6.5);
+  
+  return `object-fit: cover; object-position: ${centerX.toFixed(1)}% ${centerY.toFixed(1)}%; transform: scale(${zoom.toFixed(2)});`;
+}
+
 async function loadVerifyQueue() {
   const grid = document.getElementById('verifyGrid');
   grid.innerHTML = '<p class="loading-msg">Loading match verification queue...</p>';
@@ -598,35 +611,40 @@ async function loadVerifyQueue() {
       return;
     }
 
-    grid.innerHTML = queue.map((item) => `
-      <div class="verify-card" id="verify-card-${item.id}">
-        <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);padding-bottom:10px;">
-          <div style="font:11px var(--mono);color:var(--text);font-weight:600;">Session: ${escHtml(item.sessionTitle)}</div>
-          <span style="font:10px var(--mono);font-weight:700;padding:3px 9px;border-radius:20px;background:rgba(248,232,56,0.15);color:var(--marker);border:1px solid rgba(248,232,56,0.3);">Similarity: ${item.similarityPct}%</span>
-        </div>
-        <div class="verify-faces" style="margin-top:10px;">
-          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
-            <div class="verify-face-wrapper" title="Hover to view full photo">
-              <img src="${item.photo1.url}" class="verify-face-img" alt="${escHtml(item.photo1.filename)}" />
-              <span class="verify-zoom-tip">🔍 Face Crop</span>
-            </div>
-            <span style="font:10px var(--mono);color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(item.photo1.filename)}</span>
+    grid.innerHTML = queue.map((item) => {
+      const style1 = getFaceCropStyle(item.photo1.bboxNorm);
+      const style2 = getFaceCropStyle(item.photo2.bboxNorm);
+
+      return `
+        <div class="verify-card" id="verify-card-${item.id}">
+          <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);padding-bottom:10px;">
+            <div style="font:11px var(--mono);color:var(--text);font-weight:600;">Session: ${escHtml(item.sessionTitle)}</div>
+            <span style="font:10px var(--mono);font-weight:700;padding:3px 9px;border-radius:20px;background:rgba(248,232,56,0.15);color:var(--marker);border:1px solid rgba(248,232,56,0.3);">Similarity: ${item.similarityPct}%</span>
           </div>
-          <span class="verify-vs">VS</span>
-          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
-            <div class="verify-face-wrapper" title="Hover to view full photo">
-              <img src="${item.photo2.url}" class="verify-face-img" alt="${escHtml(item.photo2.filename)}" />
-              <span class="verify-zoom-tip">🔍 Face Crop</span>
+          <div class="verify-faces" style="margin-top:10px;">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+              <div class="verify-face-wrapper" title="Hover to view full photo">
+                <img src="${item.photo1.url}" class="verify-face-img" style="${style1}" alt="${escHtml(item.photo1.filename)}" />
+                <span class="verify-zoom-tip">🔍 Face Crop</span>
+              </div>
+              <span style="font:10px var(--mono);color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(item.photo1.filename)}</span>
             </div>
-            <span style="font:10px var(--mono);color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(item.photo2.filename)}</span>
+            <span class="verify-vs">VS</span>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+              <div class="verify-face-wrapper" title="Hover to view full photo">
+                <img src="${item.photo2.url}" class="verify-face-img" style="${style2}" alt="${escHtml(item.photo2.filename)}" />
+                <span class="verify-zoom-tip">🔍 Face Crop</span>
+              </div>
+              <span style="font:10px var(--mono);color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(item.photo2.filename)}</span>
+            </div>
+          </div>
+          <div class="verify-actions" style="margin-top:12px;">
+            <button class="confirm-btn" data-pair-id="${item.id}" data-action="confirm">✓ Confirm Same Surfer</button>
+            <button class="reject-btn" data-pair-id="${item.id}" data-action="reject">✗ Different Surfer</button>
           </div>
         </div>
-        <div class="verify-actions" style="margin-top:12px;">
-          <button class="confirm-btn" data-pair-id="${item.id}" data-action="confirm">✓ Confirm Same Surfer</button>
-          <button class="reject-btn" data-pair-id="${item.id}" data-action="reject">✗ Different Surfer</button>
-        </div>
-      </div>
-    `).join('');
+      `;
+    }).join('');
   } catch (err) {
     grid.innerHTML = `<p class="loading-msg error-msg">${escHtml(err.message)}</p>`;
   }

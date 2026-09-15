@@ -118,7 +118,10 @@ async function processFaces(env, photoId, objectKey) {
       env.DB.prepare("DELETE FROM faces WHERE photo_id = ?").bind(photoId),
       env.DB.prepare("UPDATE photos SET indexing_status = 'completed' WHERE id = ?").bind(photoId)
     ];
-    faces.forEach((face) => statements.push(env.DB.prepare('INSERT INTO faces (id, photo_id, embedding_json, confidence) VALUES (?, ?, ?, ?)').bind(id(), photoId, JSON.stringify(face.embedding), Number(face.confidence) || null)));
+    faces.forEach((face) => statements.push(
+      env.DB.prepare('INSERT INTO faces (id, photo_id, embedding_json, bbox_json, confidence) VALUES (?, ?, ?, ?, ?)')
+        .bind(id(), photoId, JSON.stringify(face.embedding), face.bbox_norm ? JSON.stringify(face.bbox_norm) : null, Number(face.confidence) || null)
+    ));
     await env.DB.batch(statements);
   } catch (err) {
     console.error('Face extraction failed:', err);
@@ -480,7 +483,8 @@ export default {
             fv.id, fv.similarity, fv.status, s.title as session_title,
             p1.id as photo1_id, p1.filename as photo1_filename,
             p2.id as photo2_id, p2.filename as photo2_filename,
-            f1.id as face1_id, f2.id as face2_id
+            f1.id as face1_id, f1.bbox_json as face1_bbox,
+            f2.id as face2_id, f2.bbox_json as face2_bbox
           FROM face_verifications fv
           JOIN sessions s ON s.id = fv.session_id
           JOIN faces f1 ON f1.id = fv.face1_id
@@ -501,11 +505,13 @@ export default {
             id: item.photo1_id,
             filename: item.photo1_filename,
             url: `${base}/api/media/${item.photo1_id}?variant=preview&token=${encodeURIComponent(await mediaToken(item.photo1_id, 'preview', env))}`,
+            bboxNorm: item.face1_bbox ? JSON.parse(item.face1_bbox) : null,
           },
           photo2: {
             id: item.photo2_id,
             filename: item.photo2_filename,
             url: `${base}/api/media/${item.photo2_id}?variant=preview&token=${encodeURIComponent(await mediaToken(item.photo2_id, 'preview', env))}`,
+            bboxNorm: item.face2_bbox ? JSON.parse(item.face2_bbox) : null,
           },
         })));
 
