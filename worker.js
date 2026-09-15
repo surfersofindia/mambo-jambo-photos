@@ -177,7 +177,7 @@ export default {
 
         if (completedPhotos === 0 && pendingPhotos > 0) {
           const estMins = Math.max(2, Math.ceil((pendingPhotos * 10) / 60));
-          return error(`🌊 Hang tight, legend! Our AI crew is currently doing housekeeping & scanning the waves for this session. Please check back in ~${estMins} mins! 🤙`, request, env, 422);
+          return error(`🌊 Hang tight, legend! Our surf crew is currently doing housekeeping & sorting through the waves for this session. Please check back in ~${estMins} mins! 🤙`, request, env, 422);
         }
 
         const faces = await env.DB.prepare('SELECT f.photo_id, f.embedding_json FROM faces f JOIN photos p ON p.id = f.photo_id WHERE p.session_id = ?').bind(sessionId).all();
@@ -202,7 +202,7 @@ export default {
         let indexingNote = null;
         if (pendingPhotos > 0) {
           const estMins = Math.max(2, Math.ceil((pendingPhotos * 10) / 60));
-          indexingNote = `🌊 Our AI crew is still doing housekeeping on ${pendingPhotos} remaining photo(s). Try checking back in ~${estMins} mins if you don't see all your shots yet! 🤙`;
+          indexingNote = `🌊 Our surf crew is still doing housekeeping on ${pendingPhotos} remaining photo(s). Try checking back in ~${estMins} mins if you don't see all your shots yet! 🤙`;
         }
         
         return response({ searchId, token, previews, count: previews.length, pricePaise: session.price_paise, currency: session.currency, indexingNote, session: { title: session.title, date: session.session_date, location: session.location } }, request, env);
