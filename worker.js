@@ -22,7 +22,7 @@ function cors(request, env) {
   const allowed = env.ALLOWED_ORIGIN || origin || '*';
   return {
     'access-control-allow-origin': allowed === '*' ? '*' : (origin === allowed ? allowed : allowed),
-    'access-control-allow-methods': 'GET, POST, OPTIONS',
+    'access-control-allow-methods': 'GET, POST, DELETE, OPTIONS',
     'access-control-allow-headers': 'Authorization, Content-Type',
     'access-control-max-age': '86400',
     vary: 'Origin',
