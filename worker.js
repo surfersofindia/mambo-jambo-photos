@@ -158,6 +158,28 @@ export default {
         const embedding = faceResults[0].embedding;
         const session = await env.DB.prepare("SELECT * FROM sessions WHERE id = ? AND status = 'published'").bind(sessionId).first();
         if (!session) return error('That session is unavailable.', request, env, 404);
+
+        const statusCheck = await env.DB.prepare(`
+          SELECT 
+            COUNT(*) as total,
+            SUM(CASE WHEN indexing_status = 'pending' THEN 1 ELSE 0 END) as pending,
+            SUM(CASE WHEN indexing_status = 'completed' THEN 1 ELSE 0 END) as completed
+          FROM photos WHERE session_id = ?
+        `).bind(sessionId).first();
+
+        const totalPhotos = Number(statusCheck?.total || 0);
+        const pendingPhotos = Number(statusCheck?.pending || 0);
+        const completedPhotos = Number(statusCheck?.completed || 0);
+
+        if (totalPhotos === 0) {
+          return error('No photos have been uploaded to this session yet.', request, env, 404);
+        }
+
+        if (completedPhotos === 0 && pendingPhotos > 0) {
+          const estMins = Math.max(2, Math.ceil((pendingPhotos * 10) / 60));
+          return error(`🌊 Hang tight, legend! Our AI crew is currently doing housekeeping & scanning the waves for this session. Please check back in ~${estMins} mins! 🤙`, request, env, 422);
+        }
+
         const faces = await env.DB.prepare('SELECT f.photo_id, f.embedding_json FROM faces f JOIN photos p ON p.id = f.photo_id WHERE p.session_id = ?').bind(sessionId).all();
         const scores = new Map();
         for (const face of faces.results) {
@@ -176,7 +198,14 @@ export default {
           url: `${base}/api/media/${photoId}?variant=preview&token=${encodeURIComponent(await mediaToken(photoId, 'preview', env))}`,
         })));
         const token = await sign({ scope: 'search', searchId, exp: Date.now() + 45 * 60_000 }, env);
-        return response({ searchId, token, previews, count: previews.length, pricePaise: session.price_paise, currency: session.currency, session: { title: session.title, date: session.session_date, location: session.location } }, request, env);
+        
+        let indexingNote = null;
+        if (pendingPhotos > 0) {
+          const estMins = Math.max(2, Math.ceil((pendingPhotos * 10) / 60));
+          indexingNote = `🌊 Our AI crew is still doing housekeeping on ${pendingPhotos} remaining photo(s). Try checking back in ~${estMins} mins if you don't see all your shots yet! 🤙`;
+        }
+        
+        return response({ searchId, token, previews, count: previews.length, pricePaise: session.price_paise, currency: session.currency, indexingNote, session: { title: session.title, date: session.session_date, location: session.location } }, request, env);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/checkout') {

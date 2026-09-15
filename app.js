@@ -151,7 +151,7 @@ function showResults(match) {
     activeSearch = match; unlockedPhotos = [];
     $('#resultsMeta').textContent = `${match.session.date} · ${match.session.location}`.toUpperCase();
     $('#resultsTitle').innerHTML = match.count ? `We found <em>${match.count}</em> shots<br />with your name on ’em.` : 'No exact matches<br />just <em>yet.</em>';
-    $('#resultsCopy').textContent = match.count ? `Here are your watermarked previews. Unlock the full set for ${money(match.pricePaise, match.currency)}.` : 'Try a clearer selfie, or ask our crew to take another look.';
+    $('#resultsCopy').textContent = match.count ? `Here are your watermarked previews. Unlock the full set for ${money(match.pricePaise, match.currency)}.` : (match.indexingNote || 'Try a clearer selfie, or ask our crew to take another look.');
     unlockButton.textContent = `Unlock full set · ${money(match.pricePaise, match.currency)}`; unlockButton.classList.toggle('hidden', !match.count); downloadButton.classList.add('hidden');
     $('#gallery').innerHTML = match.previews.map((photo, index) => `<figure class="preview" style="animation-delay:${.18 + index * .065}s"><img src="${apiUrl(photo.url)}" alt="Your watermarked surf-session preview"><div class="payment-lock">MATCH ${photo.score}% · UNLOCK TO DOWNLOAD</div></figure>`).join('');
   } else {
