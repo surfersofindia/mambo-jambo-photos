@@ -17,7 +17,7 @@ async function apiRequest(path, options = {}) {
     authorization: `Bearer ${getToken()}`,
     ...(options.headers || {}),
   };
-  const resp = await fetch(apiUrl(path), { ...options, headers, signal: options.signal || AbortSignal.timeout(path.includes('reindex') ? 300000 : 90000) });
+  const resp = await fetch(apiUrl(path), { ...options, headers, signal: options.signal || AbortSignal.timeout(90000) });
   const body = await resp.json().catch(() => ({}));
   if (resp.status === 401) { clearToken(); showLogin(); throw new Error('Your crew session expired. Please sign in again.'); }
   if (!resp.ok) throw new Error(body.error || 'Something went wrong.');
@@ -315,7 +315,9 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
           try { resolve(JSON.parse(xhr.responseText)); }
           catch { reject(new Error(`Invalid upload response: ${file.name}`)); }
         } else {
-          reject(new Error(`Upload failed: ${file.name}`));
+          let detail = `HTTP ${xhr.status}`;
+          try { detail = JSON.parse(xhr.responseText).error || detail; } catch { /* Non-JSON gateway response. */ }
+          reject(new Error(`${file.name}: ${detail}`));
         }
       };
       xhr.onerror = () => reject(new Error(`Network error: ${file.name}`));
@@ -367,7 +369,9 @@ async function loadDashboard(silent = false) {
   if (!isAuthenticated()) return;
   if (!silent) grid.innerHTML = '<p class="loading-msg">Loading sessions...</p>';
   try {
+    const requestToken = getToken();
     const { sessions } = await apiRequest('/api/admin/dashboard');
+    if (!isAuthenticated() || getToken() !== requestToken) return;
     if (!sessions.length) {
       grid.innerHTML = '<p class="empty-msg">No sessions yet. Go to the Upload tab to create one.</p>';
       updateMetrics([]);
@@ -427,7 +431,7 @@ async function loadDashboard(silent = false) {
           <div class="action-group">
             <button class="btn-sm btn-primary-sm view-photos-btn" data-session-id="${escHtml(s.id)}" data-session-title="${escHtml(s.title)}">📷 View Photos (${total})</button>
             <button class="btn-sm edit-session-btn" data-session-id="${escHtml(s.id)}" data-title="${escHtml(s.title)}" data-date="${escHtml(s.date || '')}" data-location="${escHtml(s.location || '')}" data-price="${priceRs}" data-status="${s.status}">✏️ Edit</button>
-            <button class="btn-sm reindex-btn" data-session-id="${escHtml(s.id)}">🔄 Re-index</button>
+            <button class="btn-sm reindex-btn" data-session-id="${escHtml(s.id)}" ${pending > 0 ? 'disabled' : ''}>${pending > 0 ? 'Processing…' : '↻ Re-index'}</button>
             <button class="delete-btn" data-session-id="${escHtml(s.id)}">Delete</button>
           </div>
         </div>
@@ -472,7 +476,8 @@ async function viewSessionPhotos(sessionId, sessionTitle) {
     grid.innerHTML = photos.map((p) => `
       <div class="photo-card" id="photo-card-${p.id}">
         <img src="${p.previewUrl}" alt="${escHtml(p.filename)}" loading="lazy" />
-        <span class="photo-badge">${p.face_count} face${p.face_count === 1 ? '' : 's'}</span>
+        <span class="photo-badge">${p.indexing_status === 'completed' ? `${p.face_count} face${Number(p.face_count) === 1 ? '' : 's'} detected` : escHtml(p.indexing_status)}</span>
+        <p class="photo-processing-note">${p.indexing_error ? escHtml(p.indexing_error) : p.indexing_status === 'completed' && !Number(p.face_count) ? 'No clear faces detected in this photo.' : p.indexing_status === 'pending' ? 'Queued or processing. Refresh to check progress.' : ''}</p>
         <button class="photo-delete-btn" data-photo-id="${p.id}">Delete</button>
       </div>
     `).join('');
@@ -552,10 +557,10 @@ document.getElementById('dashboardGrid').addEventListener('click', async (e) => 
   const reindexBtn = e.target.closest('.reindex-btn');
   if (reindexBtn) {
     reindexBtn.disabled = true;
-    reindexBtn.textContent = 'Re-indexing...';
+    reindexBtn.textContent = 'Adding to queue…';
     try {
       const res = await apiRequest(`/api/admin/sessions/${reindexBtn.dataset.sessionId}/reindex`, { method: 'POST' });
-      notifyCrew(`Processed ${res.reindexed || 0} photo${res.reindexed === 1 ? '' : 's'}. Check the session status for any failures.`);
+      notifyCrew(`${res.queued || 0} photos queued. ${res.alreadyQueued || 0} already processing.${res.failed ? ` ${res.failed} could not be queued; retry those after processing finishes.` : ''} You can leave this page; processing continues in the background.`);
       loadDashboard();
     } catch (err) {
       notifyCrew(err.message);

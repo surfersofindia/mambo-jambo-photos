@@ -101,7 +101,7 @@ function matchingEnv() {
 test('matching returns deduplicated signed previews, persists IDs only, and protects originals', async context => {
   const { env, searches, mediaReads } = matchingEnv();
   context.mock.method(globalThis, 'fetch', async (url, options) => {
-    assert.equal(url, env.FACE_API_URL); assert.equal(options.body.get('file').name, 'selfie.jpg');
+    assert.equal(url, env.FACE_API_URL); assert.equal(options.body.get('file').name, 'image.jpg');
     return Response.json([{ embedding: [1, 0] }]);
   });
   const result = await worker.fetch(request('/api/match', { method: 'POST', body: selfieForm(true) }), env, {});
@@ -128,4 +128,12 @@ test('malformed face-service data produces service-unavailable, without storing 
   context.mock.method(globalThis, 'fetch', async () => Response.json({ unexpected: true }));
   const result = await worker.fetch(request('/api/match', { method: 'POST', body: selfieForm(true) }), env, {});
   assert.equal(result.status, 503); assert.equal(searches.length, 0);
+});
+test('browser-style mixed-case multipart boundaries preserve selfie fields', async () => {
+  const boundary = '----WebKitFormBoundaryAaBbCc123';
+  const body = `--${boundary}\r\nContent-Disposition: form-data; name="sessionId"\r\n\r\nsession-1\r\n--${boundary}\r\nContent-Disposition: form-data; name="consent"\r\n\r\ntrue\r\n--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="selfie.jpg"\r\nContent-Type: image/jpeg\r\n\r\nimage bytes\r\n--${boundary}--\r\n`;
+  let sessionLookup = false;
+  const env = { DB: { prepare() { return { bind(id) { assert.equal(id, 'session-1'); return this; }, async first() { sessionLookup = true; return null; } }; } } };
+  const result = await worker.fetch(request('/api/match', { method: 'POST', body, headers: { 'content-type': `multipart/form-data; boundary=${boundary}` } }), env, {});
+  assert.equal(sessionLookup, true); assert.equal(result.status, 404);
 });

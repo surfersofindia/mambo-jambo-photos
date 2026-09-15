@@ -85,3 +85,9 @@ Tests cover matching with a mocked face service, deduplicated signed previews, o
 - Backups, service monitoring, inference capacity and dependency/security review.
 
 Production website: https://mambo-jambo-photos.vercel.app. Payment enablement is a separate future task.
+
+## Durable photo indexing
+
+Photo uploads and re-index requests send one job per photo to the `mambo-jambo-face-indexing` Cloudflare Queue. The consumer processes one at a time, retries service failures up to three times, and records final errors. Repeated re-index clicks do not duplicate active jobs. No-face scans are marked completed with zero faces; this is distinct from failed inference.
+
+For an existing installation, apply `migrations/0001_indexing_jobs.sql` before deploying this version of the Worker. Create the queue once with `npx wrangler queues create mambo-jambo-face-indexing`; the bindings are in `wrangler.jsonc`. New installations use the complete `schema.sql`.

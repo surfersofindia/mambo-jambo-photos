@@ -8,3 +8,4 @@ worker.js
 schema.sql
 wrangler.jsonc
 README.md
+migrations/

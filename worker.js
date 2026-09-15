@@ -49,7 +49,8 @@ async function boundedBody(request, maxBytes) {
 }
 async function readForm(request, maxBytes) {
   const body = await boundedBody(request, maxBytes);
-  try { return await new Response(body).formData(); }
+  // Blob.type lowercases MIME parameters; multipart boundaries are case-sensitive.
+  try { return await new Response(body, { headers: { 'content-type': request.headers.get('content-type') || '' } }).formData(); }
   catch { throw new RequestError('Choose a valid image upload.'); }
 }
 async function readJson(request) {
@@ -148,33 +149,67 @@ async function razorpayOrder(search, env) {
   return result.json();
 }
 
-async function processFaces(env, photoId, objectKey) {
+async function extractFaces(file, env) {
+  if (!env.FACE_API_URL) throw new RequestError('Face matching is temporarily unavailable.', 503);
+  const form = new FormData(); form.append('file', file, 'image.jpg');
+  let result;
+  try { result = await fetch(env.FACE_API_URL, { method: 'POST', body: form, signal: AbortSignal.timeout(75000) }); }
+  catch { throw new RequestError('The face service took too long to respond. Please try again shortly.', 503); }
+  if (!result.ok) throw new RequestError('The face service is temporarily unavailable. Please try again shortly.', 503);
+  let faces;
+  try { faces = await result.json(); } catch { throw new RequestError('The face service returned an unreadable result.', 503); }
+  if (!Array.isArray(faces) || faces.some(face => !Array.isArray(face?.embedding) || !face.embedding.length || !face.embedding.every(Number.isFinite) || !face.embedding.some(value => value !== 0))) throw new RequestError('The face service returned an invalid result.', 503);
+  return faces;
+}
+async function enqueuePhotos(photos, env) {
+  if (!env.INDEX_QUEUE) throw new RequestError('Photo processing is not configured. Please contact the crew.', 503);
+  let queued = 0, alreadyQueued = 0, failed = 0;
+  for (const photo of photos) {
+    const jobId = id();
+    const claim = await env.DB.prepare(`INSERT INTO indexing_jobs (photo_id, job_id, status) VALUES (?, ?, 'queued')
+      ON CONFLICT(photo_id) DO UPDATE SET job_id = excluded.job_id, status = 'queued', attempts = 0, error = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE indexing_jobs.status NOT IN ('queued', 'processing')`).bind(photo.id, jobId).run();
+    if (!claim.meta?.changes) { alreadyQueued++; continue; }
+    try {
+      await env.DB.prepare("UPDATE photos SET indexing_status = 'pending' WHERE id = ?").bind(photo.id).run();
+      await env.INDEX_QUEUE.send({ photoId: photo.id, jobId });
+      queued++;
+    } catch {
+      await env.DB.batch([
+        env.DB.prepare("UPDATE photos SET indexing_status = 'failed' WHERE id = ?").bind(photo.id),
+        env.DB.prepare("UPDATE indexing_jobs SET status = 'failed', error = 'Could not queue photo. Retry processing.', updated_at = CURRENT_TIMESTAMP WHERE photo_id = ? AND job_id = ?").bind(photo.id, jobId)
+      ]);
+      failed++;
+    }
+  }
+  return { queued, alreadyQueued, failed };
+}
+async function consumePhoto(message, env) {
+  const { photoId, jobId } = message.body || {};
+  if (!photoId || !jobId) { message.ack(); return; }
+  const job = await env.DB.prepare('SELECT p.object_key, j.job_id, j.status FROM photos p JOIN indexing_jobs j ON j.photo_id = p.id WHERE p.id = ?').bind(photoId).first();
+  if (!job || job.job_id !== jobId || ['completed', 'failed'].includes(job.status)) { message.ack(); return; }
   try {
-    const object = await env.PHOTOS.get(objectKey);
-    if (!object) throw new Error('Source photo is unavailable.');
-    const formData = new FormData();
-    formData.append('file', await object.blob(), 'image.jpg');
-
-    const apiUrl = env.FACE_API_URL;
-    if (!apiUrl) throw new Error('Face service is not configured.');
-    const req = await fetch(apiUrl, { method: 'POST', body: formData, signal: AbortSignal.timeout(75000) });
-
-    if (!req.ok) throw new Error(`Face API error: ${req.status}`);
-    const faces = await req.json();
-    if (!Array.isArray(faces) || faces.some(face => !Array.isArray(face?.embedding) || !face.embedding.length || !face.embedding.every(Number.isFinite))) throw new Error('Invalid face service response.');
-
+    await env.DB.prepare("UPDATE indexing_jobs SET status = 'processing', attempts = ?, updated_at = CURRENT_TIMESTAMP WHERE photo_id = ? AND job_id = ?").bind(message.attempts, photoId, jobId).run();
+    const object = await env.PHOTOS.get(job.object_key);
+    if (!object) throw new RequestError('Original photo is missing. Upload it again.', 404);
+    const faces = await extractFaces(await object.blob(), env);
     const statements = [
-      env.DB.prepare("DELETE FROM faces WHERE photo_id = ?").bind(photoId),
-      env.DB.prepare("UPDATE photos SET indexing_status = 'completed' WHERE id = ?").bind(photoId)
+      env.DB.prepare('DELETE FROM face_verifications WHERE face1_id IN (SELECT id FROM faces WHERE photo_id = ?) OR face2_id IN (SELECT id FROM faces WHERE photo_id = ?)').bind(photoId, photoId),
+      env.DB.prepare('DELETE FROM faces WHERE photo_id = ?').bind(photoId),
+      ...faces.map(face => env.DB.prepare('INSERT INTO faces (id, photo_id, embedding_json, bbox_json, confidence) VALUES (?, ?, ?, ?, ?)').bind(id(), photoId, JSON.stringify(face.embedding), face.bbox_norm ? JSON.stringify(face.bbox_norm) : null, Number(face.confidence) || null)),
+      env.DB.prepare("UPDATE photos SET indexing_status = 'completed' WHERE id = ?").bind(photoId),
+      env.DB.prepare("UPDATE indexing_jobs SET status = 'completed', error = NULL, updated_at = CURRENT_TIMESTAMP WHERE photo_id = ? AND job_id = ?").bind(photoId, jobId)
     ];
-    faces.forEach((face) => statements.push(
-      env.DB.prepare('INSERT INTO faces (id, photo_id, embedding_json, bbox_json, confidence) VALUES (?, ?, ?, ?, ?)')
-        .bind(id(), photoId, JSON.stringify(face.embedding), face.bbox_norm ? JSON.stringify(face.bbox_norm) : null, Number(face.confidence) || null)
-    ));
     await env.DB.batch(statements);
-  } catch (err) {
-    console.error('Face extraction failed:', err);
-    await env.DB.prepare("UPDATE photos SET indexing_status = 'failed' WHERE id = ?").bind(photoId).run();
+    message.ack();
+  } catch (error) {
+    const retry = message.attempts < 4 && error.status !== 404;
+    await env.DB.batch([
+      env.DB.prepare('UPDATE indexing_jobs SET status = ?, error = ?, updated_at = CURRENT_TIMESTAMP WHERE photo_id = ? AND job_id = ?').bind(retry ? 'queued' : 'failed', error instanceof RequestError ? error.message : 'Processing failed. Retry this photo.', photoId, jobId),
+      env.DB.prepare('UPDATE photos SET indexing_status = ? WHERE id = ?').bind(retry ? 'pending' : 'failed', photoId)
+    ]);
+    if (retry) message.retry({ delaySeconds: 60 }); else message.ack();
   }
 }
 
@@ -250,6 +285,7 @@ async function generateBorderlineMatches(env, targetSessionId = null) {
 }
 
 export default {
+  async queue(batch, env) { for (const message of batch.messages) await consumePhoto(message, env); },
   async fetch(request, env, ctx) {
     try {
       const url = new URL(request.url);
@@ -300,27 +336,20 @@ export default {
         }
 
         if (completedPhotos === 0 && pendingPhotos === 0) return error('This session’s photos could not be processed yet. Please ask the crew to retry indexing.', request, env, 422);
-        if (completedPhotos === 0 && pendingPhotos > 0) {
-          const estMins = Math.max(2, Math.ceil((pendingPhotos * 10) / 60));
-          return error(`🌊 Hang tight, legend! Our surf crew is currently doing housekeeping & sorting through the waves for this session. Please check back in ~${estMins} mins! 🤙`, request, env, 422);
-        }
+        if (completedPhotos === 0 && pendingPhotos > 0) return error('This session is still processing. Please check back shortly.', request, env, 422);
 
-        if (!env.FACE_API_URL) return error('Photo matching is temporarily unavailable.', request, env, 503);
-        const apiUrl = env.FACE_API_URL;
-        const apiForm = new FormData(); apiForm.append('file', file, 'selfie.jpg');
-        const req = await fetch(apiUrl, { method: 'POST', body: apiForm, signal: AbortSignal.timeout(75000) });
-        if (!req.ok) return error('Failed to detect face in selfie.', request, env, 500);
-        const faceResults = await req.json();
-        if (!Array.isArray(faceResults)) return error('Face matching is temporarily unavailable.', request, env, 503);
+        const faceResults = await extractFaces(file, env);
         if (faceResults.length !== 1) return error(faceResults.length ? 'Please use a selfie with only one clearly visible face.' : 'We could not find a clear face. Try a brighter, straight-on selfie.', request, env);
 
         const embedding = faceResults[0]?.embedding;
         if (!Array.isArray(embedding) || !embedding.length || !embedding.every(Number.isFinite)) return error('Face matching is temporarily unavailable.', request, env, 503);
 
-        const faces = await env.DB.prepare('SELECT f.photo_id, f.embedding_json FROM faces f JOIN photos p ON p.id = f.photo_id WHERE p.session_id = ?').bind(sessionId).all();
+        const faces = await env.DB.prepare('SELECT f.photo_id, f.embedding_json FROM faces f JOIN photos p ON p.id = f.photo_id WHERE p.session_id = ? AND p.indexing_status = \'completed\'').bind(sessionId).all();
         const scores = new Map();
         for (const face of faces.results) {
-          const score = similarity(embedding, JSON.parse(face.embedding_json));
+          let stored; try { stored = JSON.parse(face.embedding_json); } catch { continue; }
+          const score = similarity(embedding, stored);
+          if (!Number.isFinite(score)) continue;
           scores.set(face.photo_id, Math.max(scores.get(face.photo_id) || -1, score));
         }
         const threshold = Number(env.MATCH_THRESHOLD || 0.62);
@@ -338,8 +367,7 @@ export default {
 
         let indexingNote = null;
         if (pendingPhotos > 0) {
-          const estMins = Math.max(2, Math.ceil((pendingPhotos * 10) / 60));
-          indexingNote = `🌊 Our surf crew is still doing housekeeping on ${pendingPhotos} remaining photo(s). Try checking back in ~${estMins} mins if you don't see all your shots yet! 🤙`;
+          indexingNote = `${pendingPhotos} photos are still processing. Search again later to include them.`;
         }
 
         return response({ searchId, token, previews, count: previews.length, pricePaise: session.price_paise, currency: session.currency, indexingNote, session: { title: session.title, date: session.session_date, location: session.location } }, request, env);
@@ -459,9 +487,10 @@ export default {
         const sessionId = sessionPhotos[1];
         const base = url.origin;
         const photos = await env.DB.prepare(`
-          SELECT p.id, p.filename, p.indexing_status, p.created_at, COUNT(f.id) as face_count
+          SELECT p.id, p.filename, p.indexing_status, p.created_at, j.error as indexing_error, COUNT(f.id) as face_count
           FROM photos p
           LEFT JOIN faces f ON f.photo_id = p.id
+          LEFT JOIN indexing_jobs j ON j.photo_id = p.id
           WHERE p.session_id = ?
           GROUP BY p.id
           ORDER BY p.created_at DESC
@@ -503,12 +532,9 @@ export default {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
         const sessionId = reindexSession[1];
         const photos = await env.DB.prepare("SELECT id, object_key FROM photos WHERE session_id = ?").bind(sessionId).all();
-        let count = 0;
-        for (const p of photos.results) {
-          await processFaces(env, p.id, p.object_key);
-          count++;
-        }
-        return response({ reindexed: count }, request, env);
+        const session = await env.DB.prepare('SELECT id FROM sessions WHERE id = ?').bind(sessionId).first();
+        if (!session) return error('Session not found.', request, env, 404);
+        return response(await enqueuePhotos(photos.results, env), request, env, 202);
       }
 
       // PUT /api/admin/sessions/:id - Update session details or status
@@ -623,31 +649,27 @@ export default {
       if (request.method === 'POST' && reindex) {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
         const unindexed = await env.DB.prepare("SELECT id, object_key FROM photos WHERE indexing_status != 'completed'").all();
-        const results = [];
-        for (const p of unindexed.results) {
-          await processFaces(env, p.id, p.object_key);
-          results.push(p.id);
-        }
-        return response({ reindexed: results.length, ids: results }, request, env);
+        return response(await enqueuePhotos(unindexed.results, env), request, env, 202);
       }
 
       const upload = url.pathname.match(/^\/api\/admin\/sessions\/([\w-]+)\/photos$/);
       if (request.method === 'POST' && upload) {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
+        if (!env.INDEX_QUEUE) return error('Photo processing is not configured.', request, env, 503);
         const sessionId = upload[1]; const session = await env.DB.prepare("SELECT id FROM sessions WHERE id = ? AND status = 'draft'").bind(sessionId).first();
         if (!session) return error('Create a draft session before uploading.', request, env, 404);
         const form = await readForm(request, 32 * 1024 * 1024); const file = form.get('file'); const preview = form.get('preview');
         if (!(file instanceof File) || !(preview instanceof File) || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || preview.type !== 'image/jpeg' || !file.size || file.size > 25 * 1024 * 1024 || !preview.size || preview.size > 5 * 1024 * 1024) return error('An image and its preview are required.', request, env);
         const photoId = id(); const filename = safeFilename(file.name); const objectKey = `sessions/${sessionId}/original/${photoId}-${filename}`; const previewKey = `sessions/${sessionId}/preview/${photoId}.jpg`;
         await Promise.all([
-          env.PHOTOS.put(objectKey, file.stream(), { httpMetadata: { contentType: file.type } }),
-          env.PHOTOS.put(previewKey, preview.stream(), { httpMetadata: { contentType: 'image/jpeg' } }),
+          env.PHOTOS.put(objectKey, file, { httpMetadata: { contentType: file.type } }),
+          env.PHOTOS.put(previewKey, preview, { httpMetadata: { contentType: 'image/jpeg' } }),
         ]);
         await env.DB.prepare("INSERT INTO photos (id, session_id, object_key, preview_key, filename, content_type, indexing_status) VALUES (?, ?, ?, ?, ?, ?, 'pending')").bind(photoId, sessionId, objectKey, previewKey, filename, file.type).run();
 
-        ctx.waitUntil(processFaces(env, photoId, objectKey));
+        const processing = await enqueuePhotos([{ id: photoId }], env);
 
-        return response({ photoId, status: 'pending' }, request, env, 201);
+        return response({ photoId, status: processing.failed ? 'failed' : 'pending' }, request, env, 201);
       }
 
       const publish = url.pathname.match(/^\/api\/admin\/sessions\/([\w-]+)\/publish$/);

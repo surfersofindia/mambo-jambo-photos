@@ -4,14 +4,38 @@
   "main": "worker.js",
   "compatibility_date": "2026-09-14",
   "d1_databases": [
-    { "binding": "DB", "database_name": "mambo-jambo-photos", "database_id": "8dde58b7-fcb4-4420-9249-96c057011fe1" }
+    {
+      "binding": "DB",
+      "database_name": "mambo-jambo-photos",
+      "database_id": "8dde58b7-fcb4-4420-9249-96c057011fe1"
+    }
   ],
   "r2_buckets": [
-    { "binding": "PHOTOS", "bucket_name": "mambo-jambo-photos" }
+    {
+      "binding": "PHOTOS",
+      "bucket_name": "mambo-jambo-photos"
+    }
   ],
   "vars": {
     "ALLOWED_ORIGIN": "https://mambo-jambo-photos.vercel.app",
     "MATCH_THRESHOLD": "0.62",
     "FACE_API_URL": "https://ankitkotian-mambo-jambo-face-api.hf.space/extract"
+  },
+  "queues": {
+    "producers": [
+      {
+        "binding": "INDEX_QUEUE",
+        "queue": "mambo-jambo-face-indexing"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "mambo-jambo-face-indexing",
+        "max_batch_size": 1,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "max_concurrency": 1
+      }
+    ]
   }
 }
