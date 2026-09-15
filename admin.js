@@ -213,7 +213,7 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
 
   const publishBtn = document.getElementById('publishBtn');
   publishBtn.disabled = true;
-  publishBtn.textContent = 'Uploading…';
+  publishBtn.innerHTML = 'Publishing…';
   hideProgress();
 
   try {
@@ -289,20 +289,31 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
       next();
     });
 
+    const photoCount = adminFiles.length;
+    const estMins = Math.max(1, Math.ceil((photoCount * 10) / 60));
+
     // Mark session published
     await apiRequest(`/api/admin/sessions/${sessionId}/publish`, { method: 'POST' });
     adminFiles = [];
     photoInput.value = '';
+    if (typeof renderFileList === 'function') renderFileList();
     setProgress(100, 0, '');
-    setStatus('✓ Published! Your new photo pack is live and ready for guests.');
-    // Hide progress bar after a short delay so user sees 100%
+    setStatus(`✓ Published! Your session is now live. Background face indexing will take ~${estMins} min${estMins > 1 ? 's' : ''} to complete.`);
+    
+    publishBtn.innerHTML = 'Published! ✓';
+    publishBtn.classList.add('published-state');
+
     setTimeout(() => hideProgress(), 1800);
+    setTimeout(() => {
+      publishBtn.disabled = false;
+      publishBtn.classList.remove('published-state');
+      publishBtn.innerHTML = 'Publish photo pack <span>→</span>';
+    }, 4000);
   } catch (err) {
     setStatus(err.message || 'Upload failed. Your draft session is still private.', true);
     hideProgress();
-  } finally {
     publishBtn.disabled = false;
-    publishBtn.innerHTML = 'Publish photo pack <span>→</span>';
+    publishBtn.classList.remove('published-state');
   }
 });
 
