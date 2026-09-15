@@ -143,7 +143,7 @@ async function generateBorderlineMatches(env, targetSessionId = null) {
   const facesRes = await env.DB.prepare(query).all();
   const faces = facesRes.results;
   
-  const statements = [];
+  const candidates = [];
   const addedPairs = new Set();
   
   for (let i = 0; i < faces.length; i++) {
@@ -168,23 +168,33 @@ async function generateBorderlineMatches(env, targetSessionId = null) {
       
       const score = similarity(emb1, emb2);
       
-      // Borderline match zone: 0.50 <= score < 0.65
-      if (score >= 0.50 && score < 0.65) {
-        const verId = id();
-        statements.push(
-          env.DB.prepare(`
-            INSERT OR IGNORE INTO face_verifications (id, session_id, face1_id, face2_id, similarity, status)
-            VALUES (?, ?, ?, ?, ?, 'pending')
-          `).bind(verId, f1.session_id, f1.face_id, f2.face_id, score)
-        );
+      // Tight borderline match zone: 0.58 <= score <= 0.64
+      if (score >= 0.58 && score <= 0.64) {
+        candidates.push({
+          verId: id(),
+          sessionId: f1.session_id,
+          face1Id: f1.face_id,
+          face2Id: f2.face_id,
+          score,
+          diff: Math.abs(score - 0.62)
+        });
       }
     }
   }
   
+  // Pick top 5 candidates closest to 0.62 threshold
+  candidates.sort((a, b) => a.diff - b.diff);
+  const topCandidates = candidates.slice(0, 5);
+  
+  const statements = topCandidates.map((c) => (
+    env.DB.prepare(`
+      INSERT OR IGNORE INTO face_verifications (id, session_id, face1_id, face2_id, similarity, status)
+      VALUES (?, ?, ?, ?, ?, 'pending')
+    `).bind(c.verId, c.sessionId, c.face1Id, c.face2Id, c.score)
+  ));
+  
   if (statements.length > 0) {
-    for (let k = 0; k < statements.length; k += 50) {
-      await env.DB.batch(statements.slice(k, k + 50));
-    }
+    await env.DB.batch(statements);
   }
   return statements.length;
 }

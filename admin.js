@@ -578,17 +578,53 @@ document.getElementById('refreshBtn').addEventListener('click', () => loadDashbo
 
 // ── Crew Match Verification Queue ─────────────────────────────────────────────
 
-function getFaceCropStyle(bboxNorm) {
-  if (!bboxNorm || !Array.isArray(bboxNorm) || bboxNorm.length !== 4) {
-    return 'object-fit: cover; object-position: center 25%; transform: scale(1.6);';
-  }
-  const [top, left, width, height] = bboxNorm;
-  const centerX = left + (width / 2);
-  const centerY = top + (height / 2);
-  const maxDim = Math.max(width, height, 6);
-  const zoom = Math.min(Math.max(100 / maxDim, 2.2), 6.5);
-  
-  return `object-fit: cover; object-position: ${centerX.toFixed(1)}% ${centerY.toFixed(1)}%; transform: scale(${zoom.toFixed(2)});`;
+function drawCroppedFaceCanvas(canvasEl) {
+  const url = canvasEl.dataset.imgUrl;
+  let bboxNorm = null;
+  try {
+    bboxNorm = JSON.parse(canvasEl.dataset.bboxNorm || 'null');
+  } catch (e) {}
+
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    const ctx = canvasEl.getContext('2d');
+    const cw = canvasEl.width = 170;
+    const ch = canvasEl.height = 170;
+
+    let sx, sy, sw, sh;
+
+    if (bboxNorm && Array.isArray(bboxNorm) && bboxNorm.length === 4) {
+      const [topPct, leftPct, widthPct, heightPct] = bboxNorm;
+      const nw = img.naturalWidth;
+      const nh = img.naturalHeight;
+
+      const fx = (leftPct / 100) * nw;
+      const fy = (topPct / 100) * nh;
+      const fw = (widthPct / 100) * nw;
+      const fh = (heightPct / 100) * nh;
+
+      const pad = Math.max(fw, fh) * 0.3;
+      const side = Math.max(fw, fh) + (pad * 2);
+      const cx = fx + (fw / 2);
+      const cy = fy + (fh / 2);
+
+      sx = Math.max(0, cx - (side / 2));
+      sy = Math.max(0, cy - (side / 2));
+      sw = Math.min(nw - sx, side);
+      sh = Math.min(nh - sy, side);
+    } else {
+      const side = Math.min(img.naturalWidth, img.naturalHeight) * 0.38;
+      sx = (img.naturalWidth - side) / 2;
+      sy = img.naturalHeight * 0.12;
+      sw = side;
+      sh = side;
+    }
+
+    ctx.clearRect(0, 0, cw, ch);
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
+  };
+  img.src = url;
 }
 
 async function loadVerifyQueue() {
@@ -612,8 +648,8 @@ async function loadVerifyQueue() {
     }
 
     grid.innerHTML = queue.map((item) => {
-      const style1 = getFaceCropStyle(item.photo1.bboxNorm);
-      const style2 = getFaceCropStyle(item.photo2.bboxNorm);
+      const bbox1Str = item.photo1.bboxNorm ? JSON.stringify(item.photo1.bboxNorm) : '';
+      const bbox2Str = item.photo2.bboxNorm ? JSON.stringify(item.photo2.bboxNorm) : '';
 
       return `
         <div class="verify-card" id="verify-card-${item.id}">
@@ -621,30 +657,35 @@ async function loadVerifyQueue() {
             <div style="font:11px var(--mono);color:var(--text);font-weight:600;">Session: ${escHtml(item.sessionTitle)}</div>
             <span style="font:10px var(--mono);font-weight:700;padding:3px 9px;border-radius:20px;background:rgba(248,232,56,0.15);color:var(--marker);border:1px solid rgba(248,232,56,0.3);">Similarity: ${item.similarityPct}%</span>
           </div>
-          <div class="verify-faces" style="margin-top:10px;">
+          <div class="verify-faces" style="margin-top:12px;">
             <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
-              <div class="verify-face-wrapper" title="Hover to view full photo">
-                <img src="${item.photo1.url}" class="verify-face-img" style="${style1}" alt="${escHtml(item.photo1.filename)}" />
-                <span class="verify-zoom-tip">🔍 Face Crop</span>
+              <div class="verify-face-wrapper" style="width:170px;height:170px;border-radius:12px;overflow:hidden;border:2px solid rgba(248,232,56,0.35);background:#000;position:relative;">
+                <canvas class="face-crop-canvas" data-img-url="${item.photo1.url}" data-bbox-norm='${escHtml(bbox1Str)}' width="170" height="170" style="width:100%;height:100%;display:block;"></canvas>
+                <span class="verify-zoom-tip">🔍 Isolated Face</span>
               </div>
-              <span style="font:10px var(--mono);color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(item.photo1.filename)}</span>
+              <a href="${item.photo1.url}" target="_blank" style="font:10px var(--mono);color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:underline;">${escHtml(item.photo1.filename)}</a>
             </div>
             <span class="verify-vs">VS</span>
             <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
-              <div class="verify-face-wrapper" title="Hover to view full photo">
-                <img src="${item.photo2.url}" class="verify-face-img" style="${style2}" alt="${escHtml(item.photo2.filename)}" />
-                <span class="verify-zoom-tip">🔍 Face Crop</span>
+              <div class="verify-face-wrapper" style="width:170px;height:170px;border-radius:12px;overflow:hidden;border:2px solid rgba(248,232,56,0.35);background:#000;position:relative;">
+                <canvas class="face-crop-canvas" data-img-url="${item.photo2.url}" data-bbox-norm='${escHtml(bbox2Str)}' width="170" height="170" style="width:100%;height:100%;display:block;"></canvas>
+                <span class="verify-zoom-tip">🔍 Isolated Face</span>
               </div>
-              <span style="font:10px var(--mono);color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(item.photo2.filename)}</span>
+              <a href="${item.photo2.url}" target="_blank" style="font:10px var(--mono);color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:underline;">${escHtml(item.photo2.filename)}</a>
             </div>
           </div>
-          <div class="verify-actions" style="margin-top:12px;">
+          <div class="verify-actions" style="margin-top:14px;">
             <button class="confirm-btn" data-pair-id="${item.id}" data-action="confirm">✓ Confirm Same Surfer</button>
             <button class="reject-btn" data-pair-id="${item.id}" data-action="reject">✗ Different Surfer</button>
           </div>
         </div>
       `;
     }).join('');
+
+    // Draw isolated face crops on canvases
+    document.querySelectorAll('.face-crop-canvas').forEach((canvas) => {
+      drawCroppedFaceCanvas(canvas);
+    });
   } catch (err) {
     grid.innerHTML = `<p class="loading-msg error-msg">${escHtml(err.message)}</p>`;
   }
