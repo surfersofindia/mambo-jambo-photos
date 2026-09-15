@@ -563,9 +563,15 @@ async function loadVerifyQueue() {
       <div class="verify-card" id="verify-card-${item.id}">
         <div style="font:11px var(--mono);color:var(--muted);text-align:center;">Session: ${escHtml(item.sessionTitle)}</div>
         <div class="verify-faces">
-          <img src="${item.photo1Url}" class="verify-face-img" alt="Face 1" />
+          <div class="verify-face-wrapper" title="Hover to view full photo">
+            <img src="${item.photo1Url}" class="verify-face-img" alt="Face 1" />
+            <span class="verify-zoom-tip">🔍 Face Crop</span>
+          </div>
           <span class="verify-vs">VS</span>
-          <img src="${item.photo2Url}" class="verify-face-img" alt="Face 2" />
+          <div class="verify-face-wrapper" title="Hover to view full photo">
+            <img src="${item.photo2Url}" class="verify-face-img" alt="Face 2" />
+            <span class="verify-zoom-tip">🔍 Face Crop</span>
+          </div>
         </div>
         <div class="verify-actions">
           <button class="confirm-btn" data-pair-id="${item.id}" data-action="confirm">✓ Confirm Match</button>
@@ -583,22 +589,35 @@ document.getElementById('verifyGrid').addEventListener('click', async (e) => {
   if (!btn) return;
   const pairId = btn.dataset.pairId;
   const confirmed = btn.dataset.action === 'confirm';
+  const card = document.getElementById(`verify-card-${pairId}`);
+
   btn.disabled = true;
-  btn.textContent = 'Saving...';
+  btn.textContent = confirmed ? 'Confirming...' : 'Rejecting...';
+
   try {
     await apiRequest('/api/admin/confirm-match', {
       method: 'POST',
       body: JSON.stringify({ pairId, confirmed }),
     });
-    const card = document.getElementById(`verify-card-${pairId}`);
-    if (card) card.remove();
-    const remaining = document.querySelectorAll('.verify-card');
-    if (!remaining.length) {
-      document.getElementById('verifyGrid').innerHTML = '<p class="empty-msg">All face matches verified! Crew match queue is clean. 🤙</p>';
+
+    if (card) {
+      // Smooth fade out & slide up animation before removal
+      card.style.transition = 'all 0.35s cubic-bezier(0.4, 0, 0.2, 1)';
+      card.style.opacity = '0';
+      card.style.transform = 'translateY(-12px) scale(0.95)';
+
+      setTimeout(() => {
+        card.remove();
+        const remaining = document.querySelectorAll('.verify-card');
+        if (!remaining.length) {
+          document.getElementById('verifyGrid').innerHTML = '<p class="empty-msg">All face matches verified! Crew match queue is clean. 🤙</p>';
+        }
+      }, 350);
     }
   } catch (err) {
     alert(err.message);
     btn.disabled = false;
+    btn.textContent = confirmed ? '✓ Confirm Match' : '✗ Not Same Person';
   }
 });
 
