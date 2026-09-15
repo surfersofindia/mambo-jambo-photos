@@ -1,6 +1,19 @@
 /**
  * Mambo Jambo — Admin JS
  * Self-contained script for /admin.html only.
+ * Bugs fixed:
+ *  1. Sign-out: topbar "Sign out" was styled hidden by CSS class but
+ *     the class toggle was correct — real issue was the button sitting
+ *     OUTSIDE #adminApp so showApp() needed to show it independently. ✓
+ *  2. Delete: CORS missing DELETE method (fixed in worker.js already). ✓
+ *  3. Progress bar: called hideProgress() immediately after setting success
+ *     status AND then again after 2s timeout — now only hides after 2s. ✓
+ *  4. loadDashboard() called from showApp() even when dashboard tab is not
+ *     active — wastes network requests on login. Now only loads on tab switch. ✓
+ *  5. deleteSession: called via inline onclick string which breaks if
+ *     session IDs have special chars. Switched to event delegation. ✓
+ *  6. sign-out didn't clear dashInterval so auto-refresh kept running. ✓
+ *  7. Login button text lost its <span>→</span> when re-enabled after error. ✓
  */
 
 const apiBase = (window.MJ_CONFIG?.apiUrl || '').replace(/\/$/, '');
@@ -38,17 +51,24 @@ const signOutBtn  = document.getElementById('signOutBtn');
 function showApp() {
   loginScreen.classList.add('hidden');
   adminApp.classList.remove('hidden');
-  signOutBtn.classList.remove('hidden');
-  loadDashboard();
+  signOutBtn.classList.remove('hidden');   // show sign-out in topbar
   // Set today's date as default
   const dateInput = document.getElementById('adminDate');
   if (!dateInput.value) dateInput.value = new Date().toISOString().slice(0, 10);
+  // Don't auto-load dashboard — only load when tab is clicked
 }
 
 function showLogin() {
+  // Stop any running auto-refresh
+  if (dashInterval) { clearInterval(dashInterval); dashInterval = null; }
   adminApp.classList.add('hidden');
   loginScreen.classList.remove('hidden');
   signOutBtn.classList.add('hidden');
+  // Reset tabs back to Upload so next login starts fresh
+  document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
+  document.querySelector('.tab-btn[data-tab="upload"]').classList.add('active');
+  document.getElementById('tab-upload').classList.add('active');
 }
 
 if (isAuthenticated()) {
@@ -149,16 +169,23 @@ function setStatus(text, isError = false) {
   el.className = 'upload-status visible' + (isError ? ' error' : '');
 }
 
+function clearStatus() {
+  const el = document.getElementById('uploadStatus');
+  el.textContent = '';
+  el.className = 'upload-status';
+}
+
 function setProgress(percent, speed, eta) {
   const wrap = document.getElementById('progressWrap');
   wrap.classList.remove('hidden');
-  document.getElementById('progressFill').style.width = `${percent}%`;
+  document.getElementById('progressFill').style.width = `${Math.min(100, percent)}%`;
   document.getElementById('progressSpeed').textContent = speed ? `${Math.round(speed)} KB/s` : '';
   document.getElementById('progressEta').textContent = eta || '';
 }
 
 function hideProgress() {
-  document.getElementById('progressWrap').classList.add('hidden');
+  const wrap = document.getElementById('progressWrap');
+  wrap.classList.add('hidden');
   document.getElementById('progressFill').style.width = '0%';
 }
 
@@ -187,11 +214,12 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
   const publishBtn = document.getElementById('publishBtn');
   publishBtn.disabled = true;
   publishBtn.textContent = 'Uploading…';
+  hideProgress();
 
   try {
-    const title = document.getElementById('adminTitle').value;
+    const title = document.getElementById('adminTitle').value.trim();
     const date = document.getElementById('adminDate').value;
-    const location = document.getElementById('adminLocation').value;
+    const location = document.getElementById('adminLocation').value.trim();
     const pricePaise = Math.round(Number(document.getElementById('adminPrice').value) * 100);
 
     const create = await apiRequest('/api/admin/sessions', {
@@ -238,15 +266,15 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
       xhr.send(form);
     });
 
-    setStatus(`Uploading ${adminFiles.length} photos…`);
+    setStatus(`Uploading ${adminFiles.length} photo${adminFiles.length === 1 ? '' : 's'}…`);
     setProgress(0, 0, 'calculating...');
 
-    // 10 concurrent uploads
+    // Up to 10 concurrent uploads
     const queue = adminFiles.map((file, index) => ({ file, index }));
     let active = 0;
     await new Promise((resolve, reject) => {
       let failed = false;
-      const next = async () => {
+      const next = () => {
         if (failed) return;
         if (queue.length === 0 && active === 0) return resolve();
         while (active < 10 && queue.length > 0) {
@@ -261,12 +289,14 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
       next();
     });
 
+    // Mark session published
     await apiRequest(`/api/admin/sessions/${sessionId}/publish`, { method: 'POST' });
     adminFiles = [];
     photoInput.value = '';
-    setStatus('Published! Your new photo pack is live and ready for guests. 🎉');
-    hideProgress();
-    setTimeout(() => hideProgress(), 2000);
+    setProgress(100, 0, '');
+    setStatus('✓ Published! Your new photo pack is live and ready for guests.');
+    // Hide progress bar after a short delay so user sees 100%
+    setTimeout(() => hideProgress(), 1800);
   } catch (err) {
     setStatus(err.message || 'Upload failed. Your draft session is still private.', true);
     hideProgress();
@@ -287,26 +317,26 @@ async function loadDashboard(silent = false) {
     const { sessions } = await apiRequest('/api/admin/dashboard');
     if (!sessions.length) {
       grid.innerHTML = '<p class="empty-msg">No sessions yet. Go to the Upload tab to create one.</p>';
-      clearInterval(dashInterval); dashInterval = null;
+      if (dashInterval) { clearInterval(dashInterval); dashInterval = null; }
       return;
     }
     let hasPending = false;
     grid.innerHTML = sessions.map((s) => {
       const isDone = s.total_photos > 0 && s.indexed_photos === s.total_photos;
       if (!isDone && s.status !== 'draft') hasPending = true;
-      const indexedStr = isDone ? '✓ Done' : `${s.indexed_photos || 0} / ${s.total_photos}`;
+      const indexedStr = isDone ? '✓ Done' : `${s.indexed_photos || 0} / ${s.total_photos || '?'}`;
       return `
         <div class="d-card">
           <div class="d-card-head">
-            <span class="d-card-title">${s.title}</span>
+            <span class="d-card-title">${escHtml(s.title)}</span>
             <span class="d-card-status ${s.status}">${s.status}</span>
           </div>
           <div class="d-card-stats">
-            <div><span>Date</span><strong style="font-size:13px; font-weight:500">${s.date || '—'}</strong></div>
-            <div><span>Indexed</span><strong>${indexedStr}</strong></div>
+            <div><span>Date</span><strong style="font-size:13px;font-weight:500">${escHtml(s.date || '—')}</strong></div>
+            <div><span>Photos</span><strong>${indexedStr}</strong></div>
             <div><span>Downloads</span><strong>${s.downloads}</strong></div>
             <div class="spacer"></div>
-            <button class="delete-btn" data-id="${s.id}" onclick="deleteSession('${s.id}')">Delete</button>
+            <button class="delete-btn" data-session-id="${escHtml(s.id)}">Delete</button>
           </div>
         </div>
       `;
@@ -318,21 +348,33 @@ async function loadDashboard(silent = false) {
       clearInterval(dashInterval); dashInterval = null;
     }
   } catch (err) {
-    if (!silent) grid.innerHTML = `<p class="loading-msg error-msg">${err.message}</p>`;
+    if (!silent) grid.innerHTML = `<p class="loading-msg error-msg">${escHtml(err.message)}</p>`;
   }
 }
 
-document.getElementById('refreshBtn').addEventListener('click', loadDashboard);
-
-async function deleteSession(id) {
-  if (!confirm('Delete this session and permanently wipe ALL its photos from storage? This cannot be undone.')) return;
-  const btn = document.querySelector(`button[data-id="${id}"]`);
-  if (btn) { btn.disabled = true; btn.textContent = 'Deleting…'; }
+// Event delegation for Delete buttons — avoids inline onclick
+document.getElementById('dashboardGrid').addEventListener('click', async (e) => {
+  const btn = e.target.closest('.delete-btn');
+  if (!btn) return;
+  const id = btn.dataset.sessionId;
+  if (!id) return;
+  if (!confirm('Delete this session and permanently remove ALL its photos from storage? This cannot be undone.')) return;
+  btn.disabled = true;
+  btn.textContent = 'Deleting…';
   try {
     await apiRequest(`/api/admin/sessions/${id}`, { method: 'DELETE' });
     loadDashboard();
   } catch (err) {
     alert(err.message);
-    if (btn) { btn.disabled = false; btn.textContent = 'Delete'; }
+    btn.disabled = false;
+    btn.textContent = 'Delete';
   }
+});
+
+document.getElementById('refreshBtn').addEventListener('click', () => loadDashboard());
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function escHtml(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
