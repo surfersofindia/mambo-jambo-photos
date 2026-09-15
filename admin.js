@@ -34,8 +34,9 @@ async function apiRequest(path, options = {}) {
     authorization: `Bearer ${getToken()}`,
     ...(options.headers || {}),
   };
-  const resp = await fetch(apiUrl(path), { ...options, headers });
+  const resp = await fetch(apiUrl(path), { ...options, headers, signal: options.signal || AbortSignal.timeout(path.includes('reindex') ? 300000 : 90000) });
   const body = await resp.json().catch(() => ({}));
+  if (resp.status === 401) { clearToken(); showLogin(); throw new Error('Your crew session expired. Please sign in again.'); }
   if (!resp.ok) throw new Error(body.error || 'Something went wrong.');
   return body;
 }
@@ -98,6 +99,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ password: passwordEl.value }),
+      signal: AbortSignal.timeout(20000),
     });
     const body = await result.json().catch(() => ({}));
     if (!result.ok) throw new Error(body.error || 'Incorrect password.');
@@ -176,7 +178,7 @@ async function watermarkedPreview(file) {
   ctx.textAlign = 'center';
   ctx.fillText('MAMBO JAMBO  •  PREVIEW', 0, 0);
   ctx.restore();
-  return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), 'image/jpeg', .82));
+  return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not prepare this photo for upload.')), 'image/jpeg', .82));
 }
 
 // ── Upload: file selection & drag/drop ────────────────────────────────────────
@@ -212,12 +214,18 @@ function hideProgress() {
 }
 
 function selectFiles(files) {
-  adminFiles = [...files].filter((f) => f.type.startsWith('image/'));
+  const selected = [...files];
+  adminFiles = selected.filter(f => ['image/jpeg', 'image/png', 'image/webp'].includes(f.type) && f.size > 0 && f.size <= 25 * 1024 * 1024);
+  if (adminFiles.length !== selected.length) {
+    adminFiles = [];
+    setStatus('Choose only JPG, PNG or WebP photos up to 25 MB each. Remove unsupported files and select again.', true);
+    return;
+  }
   if (adminFiles.length) {
     setStatus(`${adminFiles.length} photo${adminFiles.length === 1 ? '' : 's'} selected. Click "Publish photo pack" to upload.`);
     window.setTimeout(() => document.getElementById('publishBtn').scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
   } else {
-    setStatus('No valid images selected. Choose JPG or PNG files.', true);
+    setStatus('No valid images selected. Choose JPG, PNG or WebP files.', true);
   }
 }
 
@@ -262,6 +270,9 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', apiUrl(`/api/admin/sessions/${sessionId}/photos`));
       xhr.setRequestHeader('authorization', `Bearer ${getToken()}`);
+      xhr.timeout = 120000;
+      xhr.ontimeout = () => reject(new Error(`Upload timed out: ${file.name}. Please try again.`));
+      xhr.onabort = () => reject(new Error(`Upload cancelled: ${file.name}`));
 
       xhr.upload.onprogress = (ev) => {
         if (ev.lengthComputable) {
@@ -279,7 +290,8 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
           fileProgress[index] = file.size;
-          resolve(JSON.parse(xhr.responseText));
+          try { resolve(JSON.parse(xhr.responseText)); }
+          catch { reject(new Error(`Invalid upload response: ${file.name}`)); }
         } else {
           reject(new Error(`Upload failed: ${file.name}`));
         }

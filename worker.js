@@ -9,7 +9,7 @@
 const encoder = new TextEncoder();
 const json = (data, status = 200, extra = {}) => new Response(JSON.stringify(data), {
   status,
-  headers: { 'content-type': 'application/json; charset=utf-8', ...extra },
+  headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...extra },
 });
 const id = () => crypto.randomUUID();
 const dateAfterMinutes = (minutes) => new Date(Date.now() + minutes * 60_000).toISOString();
@@ -19,14 +19,59 @@ const fromBase64url = (value) => atob(value.replace(/-/g, '+').replace(/_/g, '/'
 
 function cors(request, env) {
   const origin = request.headers.get('Origin');
-  const allowed = env.ALLOWED_ORIGIN || origin || '*';
+  const allowed = (env.ALLOWED_ORIGIN || '').split(',').map(value => value.trim()).filter(Boolean);
   return {
-    'access-control-allow-origin': allowed === '*' ? '*' : (origin === allowed ? allowed : allowed),
-    'access-control-allow-methods': 'GET, POST, DELETE, OPTIONS',
+    ...(origin && allowed.includes(origin) ? { 'access-control-allow-origin': origin } : {}),
+    'access-control-allow-methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'access-control-allow-headers': 'Authorization, Content-Type',
     'access-control-max-age': '86400',
     vary: 'Origin',
   };
+}
+class RequestError extends Error {
+  constructor(message, status = 400) { super(message); this.status = status; }
+}
+async function boundedBody(request, maxBytes) {
+  if (Number(request.headers.get('content-length')) > maxBytes) throw new RequestError('The upload is too large.', 413);
+  if (!request.body) throw new RequestError('A request body is required.');
+  const reader = request.body.getReader();
+  const chunks = []; let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) { await reader.cancel(); throw new RequestError('The upload is too large.', 413); }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  return new Blob(chunks, { type: request.headers.get('content-type') || '' });
+}
+async function readForm(request, maxBytes) {
+  const body = await boundedBody(request, maxBytes);
+  try { return await new Response(body).formData(); }
+  catch { throw new RequestError('Choose a valid image upload.'); }
+}
+async function readJson(request) {
+  const body = await boundedBody(request, 16384);
+  try {
+    const data = JSON.parse(await body.text());
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error();
+    return data;
+  } catch { throw new RequestError('Send a valid JSON object.'); }
+}
+function validDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(value + 'T12:00:00Z');
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+function validateSession(data, partial = false) {
+  for (const field of ['title', 'location']) {
+    if ((!partial || data[field] !== undefined) && (typeof data[field] !== 'string' || !data[field].trim() || data[field].trim().length > 80)) throw new RequestError('Session name and location must contain 1–80 characters.');
+  }
+  if ((!partial || data.date !== undefined) && !validDate(data.date)) throw new RequestError('Choose a valid session date.');
+  if ((!partial || data.pricePaise !== undefined) && (!Number.isSafeInteger(Number(data.pricePaise)) || Number(data.pricePaise) < 100)) throw new RequestError('Enter a valid future photo-pack price.');
+  if (data.status !== undefined && !['draft', 'published', 'archived'].includes(data.status)) throw new RequestError('Choose a valid session status.');
 }
 function response(data, request, env, status = 200) {
   return json(data, status, cors(request, env));
@@ -40,7 +85,7 @@ async function hmac(value, secret) {
   return Array.from(new Uint8Array(signature)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 function same(a, b) {
-  if (!a || !b || a.length !== b.length) return false;
+  if (typeof a !== 'string' || typeof b !== 'string' || !a || !b || a.length !== b.length) return false;
   let result = 0;
   for (let i = 0; i < a.length; i += 1) result |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return result === 0;
@@ -51,7 +96,9 @@ async function sign(payload, env) {
 }
 async function verify(token, env) {
   if (!token || !env.SESSION_SECRET) return null;
-  const [encoded, signature] = token.split('.');
+  const parts = token.split('.');
+  if (parts.length !== 2) return null;
+  const [encoded, signature] = parts;
   if (!encoded || !same(await hmac(encoded, env.SESSION_SECRET), signature)) return null;
   try {
     const payload = JSON.parse(fromBase64url(encoded));
@@ -104,16 +151,18 @@ async function razorpayOrder(search, env) {
 async function processFaces(env, photoId, objectKey) {
   try {
     const object = await env.PHOTOS.get(objectKey);
-    if (!object) return;
+    if (!object) throw new Error('Source photo is unavailable.');
     const formData = new FormData();
     formData.append('file', await object.blob(), 'image.jpg');
-    
-    const apiUrl = env.FACE_API_URL || 'http://localhost:8080/extract';
-    const req = await fetch(apiUrl, { method: 'POST', body: formData });
-    
+
+    const apiUrl = env.FACE_API_URL;
+    if (!apiUrl) throw new Error('Face service is not configured.');
+    const req = await fetch(apiUrl, { method: 'POST', body: formData, signal: AbortSignal.timeout(75000) });
+
     if (!req.ok) throw new Error(`Face API error: ${req.status}`);
     const faces = await req.json();
-    
+    if (!Array.isArray(faces) || faces.some(face => !Array.isArray(face?.embedding) || !face.embedding.length || !face.embedding.every(Number.isFinite))) throw new Error('Invalid face service response.');
+
     const statements = [
       env.DB.prepare("DELETE FROM faces WHERE photo_id = ?").bind(photoId),
       env.DB.prepare("UPDATE photos SET indexing_status = 'completed' WHERE id = ?").bind(photoId)
@@ -137,37 +186,38 @@ async function generateBorderlineMatches(env, targetSessionId = null) {
     JOIN sessions s ON s.id = p.session_id
   `;
   if (targetSessionId) {
-    query += ` WHERE p.session_id = '${targetSessionId}'`;
+    query += ' WHERE p.session_id = ?';
   }
-  
-  const facesRes = await env.DB.prepare(query).all();
+
+  const statement = env.DB.prepare(query);
+  const facesRes = await (targetSessionId ? statement.bind(targetSessionId) : statement).all();
   const faces = facesRes.results;
-  
+
   const candidates = [];
   const addedPairs = new Set();
-  
+
   for (let i = 0; i < faces.length; i++) {
     const f1 = faces[i];
     let emb1;
     try { emb1 = JSON.parse(f1.embedding_json); } catch { continue; }
-    
+
     for (let j = i + 1; j < faces.length; j++) {
       const f2 = faces[j];
-      
+
       // Never compare faces from the SAME photo
       if (f1.photo_id === f2.photo_id) continue;
       // Only compare within the same session
       if (f1.session_id !== f2.session_id) continue;
-      
+
       const pairKey = f1.face_id < f2.face_id ? `${f1.face_id}:${f2.face_id}` : `${f2.face_id}:${f1.face_id}`;
       if (addedPairs.has(pairKey)) continue;
       addedPairs.add(pairKey);
-      
+
       let emb2;
       try { emb2 = JSON.parse(f2.embedding_json); } catch { continue; }
-      
+
       const score = similarity(emb1, emb2);
-      
+
       // Tight borderline match zone: 0.58 <= score <= 0.64
       if (score >= 0.58 && score <= 0.64) {
         candidates.push({
@@ -181,18 +231,18 @@ async function generateBorderlineMatches(env, targetSessionId = null) {
       }
     }
   }
-  
+
   // Pick top 5 candidates closest to 0.62 threshold
   candidates.sort((a, b) => a.diff - b.diff);
   const topCandidates = candidates.slice(0, 5);
-  
+
   const statements = topCandidates.map((c) => (
     env.DB.prepare(`
       INSERT OR IGNORE INTO face_verifications (id, session_id, face1_id, face2_id, similarity, status)
       VALUES (?, ?, ?, ?, ?, 'pending')
     `).bind(c.verId, c.sessionId, c.face1Id, c.face2Id, c.score)
   ));
-  
+
   if (statements.length > 0) {
     await env.DB.batch(statements);
   }
@@ -206,8 +256,13 @@ export default {
       if (request.method === 'OPTIONS') return new Response(null, { headers: cors(request, env) });
       if (!url.pathname.startsWith('/api/')) return error('Not found', request, env, 404);
 
+      // Checkout stays unavailable until a separate payment launch.
+      if (url.pathname === '/api/checkout' || url.pathname.startsWith('/api/payment/')) {
+        return error('Payments are currently on hold.', request, env, 503);
+      }
+
       if (request.method === 'POST' && url.pathname === '/api/admin/login') {
-        const { password } = await request.json();
+        const { password } = await readJson(request);
         if (!env.ADMIN_PASSWORD || !same(password, env.ADMIN_PASSWORD)) return error('Incorrect password.', request, env, 401);
         const token = await sign({ role: 'admin', exp: Date.now() + 8 * 60 * 60_000 }, env);
         return response({ token }, request, env);
@@ -219,24 +274,17 @@ export default {
       }
 
       if (request.method === 'POST' && url.pathname === '/api/match') {
-        const form = await request.formData(); 
+        if (Number(request.headers.get('content-length')) > 11 * 1024 * 1024) return error('Selfie uploads must be smaller than 10 MB.', request, env, 413);
+        const form = await readForm(request, 11 * 1024 * 1024);
         const sessionId = form.get('sessionId');
         const file = form.get('file');
-        if (!sessionId || !(file instanceof File)) return error('A valid selfie image and session are required.', request, env);
-        
-        const apiUrl = env.FACE_API_URL || 'http://localhost:8080/extract';
-        const apiForm = new FormData(); apiForm.append('file', file, 'selfie.jpg');
-        const req = await fetch(apiUrl, { method: 'POST', body: apiForm });
-        if (!req.ok) return error('Failed to detect face in selfie.', request, env, 500);
-        const faceResults = await req.json();
-        if (faceResults.length !== 1) return error(faceResults.length ? 'Please use a selfie with only one clearly visible face.' : 'We could not find a clear face. Try a brighter, straight-on selfie.', request, env);
-        
-        const embedding = faceResults[0].embedding;
+        if (typeof sessionId !== 'string' || !sessionId || !(file instanceof File)) return error('A valid selfie image and session are required.', request, env);
+        if (form.get('consent') !== 'true') return error('Your consent is required for face matching.', request, env);
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || !file.size || file.size > 10 * 1024 * 1024) return error('Choose a JPG, PNG or WebP selfie smaller than 10 MB.', request, env, 413);
         const session = await env.DB.prepare("SELECT * FROM sessions WHERE id = ? AND status = 'published'").bind(sessionId).first();
         if (!session) return error('That session is unavailable.', request, env, 404);
-
         const statusCheck = await env.DB.prepare(`
-          SELECT 
+          SELECT
             COUNT(*) as total,
             SUM(CASE WHEN indexing_status = 'pending' THEN 1 ELSE 0 END) as pending,
             SUM(CASE WHEN indexing_status = 'completed' THEN 1 ELSE 0 END) as completed
@@ -251,10 +299,23 @@ export default {
           return error('No photos have been uploaded to this session yet.', request, env, 404);
         }
 
+        if (completedPhotos === 0 && pendingPhotos === 0) return error('This session’s photos could not be processed yet. Please ask the crew to retry indexing.', request, env, 422);
         if (completedPhotos === 0 && pendingPhotos > 0) {
           const estMins = Math.max(2, Math.ceil((pendingPhotos * 10) / 60));
           return error(`🌊 Hang tight, legend! Our surf crew is currently doing housekeeping & sorting through the waves for this session. Please check back in ~${estMins} mins! 🤙`, request, env, 422);
         }
+
+        if (!env.FACE_API_URL) return error('Photo matching is temporarily unavailable.', request, env, 503);
+        const apiUrl = env.FACE_API_URL;
+        const apiForm = new FormData(); apiForm.append('file', file, 'selfie.jpg');
+        const req = await fetch(apiUrl, { method: 'POST', body: apiForm, signal: AbortSignal.timeout(75000) });
+        if (!req.ok) return error('Failed to detect face in selfie.', request, env, 500);
+        const faceResults = await req.json();
+        if (!Array.isArray(faceResults)) return error('Face matching is temporarily unavailable.', request, env, 503);
+        if (faceResults.length !== 1) return error(faceResults.length ? 'Please use a selfie with only one clearly visible face.' : 'We could not find a clear face. Try a brighter, straight-on selfie.', request, env);
+
+        const embedding = faceResults[0]?.embedding;
+        if (!Array.isArray(embedding) || !embedding.length || !embedding.every(Number.isFinite)) return error('Face matching is temporarily unavailable.', request, env, 503);
 
         const faces = await env.DB.prepare('SELECT f.photo_id, f.embedding_json FROM faces f JOIN photos p ON p.id = f.photo_id WHERE p.session_id = ?').bind(sessionId).all();
         const scores = new Map();
@@ -274,18 +335,18 @@ export default {
           url: `${base}/api/media/${photoId}?variant=preview&token=${encodeURIComponent(await mediaToken(photoId, 'preview', env))}`,
         })));
         const token = await sign({ scope: 'search', searchId, exp: Date.now() + 45 * 60_000 }, env);
-        
+
         let indexingNote = null;
         if (pendingPhotos > 0) {
           const estMins = Math.max(2, Math.ceil((pendingPhotos * 10) / 60));
           indexingNote = `🌊 Our surf crew is still doing housekeeping on ${pendingPhotos} remaining photo(s). Try checking back in ~${estMins} mins if you don't see all your shots yet! 🤙`;
         }
-        
+
         return response({ searchId, token, previews, count: previews.length, pricePaise: session.price_paise, currency: session.currency, indexingNote, session: { title: session.title, date: session.session_date, location: session.location } }, request, env);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/checkout') {
-        const { searchId, token } = await request.json();
+        const { searchId, token } = await readJson(request);
         const payload = await verify(token, env);
         if (payload?.scope !== 'search' || payload.searchId !== searchId) return error('This gallery link has expired.', request, env, 401);
         const search = await env.DB.prepare("SELECT * FROM searches WHERE id = ? AND status = 'preview' AND expires_at > CURRENT_TIMESTAMP").bind(searchId).first();
@@ -298,7 +359,7 @@ export default {
       }
 
       if (request.method === 'POST' && url.pathname === '/api/payment/verify') {
-        const { searchId, token, razorpay_payment_id: paymentId, razorpay_order_id: orderId, razorpay_signature: signature } = await request.json();
+        const { searchId, token, razorpay_payment_id: paymentId, razorpay_order_id: orderId, razorpay_signature: signature } = await readJson(request);
         const payload = await verify(token, env);
         if (payload?.scope !== 'search' || payload.searchId !== searchId) return error('This gallery link has expired.', request, env, 401);
         const payment = await env.DB.prepare('SELECT * FROM payments WHERE razorpay_order_id = ? AND search_id = ?').bind(orderId, searchId).first();
@@ -333,9 +394,9 @@ export default {
 
       if (request.method === 'POST' && url.pathname === '/api/admin/sessions') {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
-        const { title, date, location, pricePaise } = await request.json();
-        if (!title || !date || !location || !Number.isInteger(Number(pricePaise)) || Number(pricePaise) < 100) return error('Enter a title, date, location, and price.', request, env);
-        const session = { id: id(), title: title.slice(0, 80), date, location: location.slice(0, 80), price: Number(pricePaise) };
+        const { title, date, location, pricePaise } = await readJson(request);
+        validateSession({ title, date, location, pricePaise });
+        const session = { id: id(), title: title.trim(), date, location: location.trim(), price: Number(pricePaise) };
         await env.DB.prepare('INSERT INTO sessions (id, title, session_date, location, price_paise) VALUES (?, ?, ?, ?, ?)').bind(session.id, session.title, session.date, session.location, session.price).run();
         return response({ session }, request, env, 201);
       }
@@ -344,7 +405,7 @@ export default {
       if (request.method === 'GET' && dashboard) {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
         const query = `
-          SELECT 
+          SELECT
             s.id, s.title, s.session_date as date, s.location, s.status, s.price_paise,
             COUNT(DISTINCT p.id) as total_photos,
             SUM(CASE WHEN p.indexing_status = 'completed' THEN 1 ELSE 0 END) as indexed_photos,
@@ -365,10 +426,10 @@ export default {
       if (request.method === 'DELETE' && deleteSession) {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
         const sessionId = deleteSession[1];
-        
+
         // Fetch all photos for this session
         const photos = await env.DB.prepare('SELECT object_key, preview_key FROM photos WHERE session_id = ?').bind(sessionId).all();
-        
+
         // Delete all photo files from R2
         if (photos.results.length > 0) {
           const keysToDelete = photos.results.flatMap(p => [p.object_key, p.preview_key]);
@@ -378,7 +439,7 @@ export default {
           }
           await Promise.all(chunks);
         }
-        
+
         // Delete all DB records in correct dependency order to prevent foreign key errors
         await env.DB.batch([
           env.DB.prepare('DELETE FROM payments WHERE search_id IN (SELECT id FROM searches WHERE session_id = ?)').bind(sessionId),
@@ -455,17 +516,24 @@ export default {
       if (request.method === 'PUT' && updateSession) {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
         const sessionId = updateSession[1];
-        const { title, date, location, pricePaise, status } = await request.json();
-        
+        const { title, date, location, pricePaise, status } = await readJson(request);
+        validateSession({ title, date, location, pricePaise, status }, true);
+        const existing = await env.DB.prepare('SELECT id FROM sessions WHERE id = ?').bind(sessionId).first();
+        if (!existing) return error('Session not found.', request, env, 404);
+        if (status === 'published') {
+          const count = await env.DB.prepare('SELECT COUNT(*) AS count FROM photos WHERE session_id = ?').bind(sessionId).first();
+          if (!count?.count) return error('Upload at least one photo before publishing.', request, env);
+        }
+
         await env.DB.prepare(`
-          UPDATE sessions 
+          UPDATE sessions
           SET title = COALESCE(?, title),
               session_date = COALESCE(?, session_date),
               location = COALESCE(?, location),
               price_paise = COALESCE(?, price_paise),
               status = COALESCE(?, status)
           WHERE id = ?
-        `).bind(title || null, date || null, location || null, pricePaise ? Number(pricePaise) : null, status || null, sessionId).run();
+        `).bind(title?.trim() || null, date || null, location?.trim() || null, pricePaise ? Number(pricePaise) : null, status || null, sessionId).run();
 
         return response({ updated: true }, request, env);
       }
@@ -481,7 +549,7 @@ export default {
       if (request.method === 'GET' && url.pathname === '/api/admin/verify-queue') {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
         const base = url.origin;
-        
+
         // Auto-scan borderline matches if queue is empty
         const countCheck = await env.DB.prepare("SELECT COUNT(*) as cnt FROM face_verifications WHERE status = 'pending'").first();
         if (!countCheck || countCheck.cnt === 0) {
@@ -489,7 +557,7 @@ export default {
         }
 
         const query = `
-          SELECT 
+          SELECT
             fv.id, fv.similarity, fv.status, s.title as session_title,
             p1.id as photo1_id, p1.filename as photo1_filename,
             p2.id as photo2_id, p2.filename as photo2_filename,
@@ -526,7 +594,7 @@ export default {
         })));
 
         const stats = await env.DB.prepare(`
-          SELECT 
+          SELECT
             SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
             SUM(CASE WHEN status = 'confirmed' THEN 1 ELSE 0 END) as confirmed,
             SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected
@@ -539,12 +607,12 @@ export default {
       // POST /api/admin/confirm-match - Confirm or reject borderline face match
       if (request.method === 'POST' && url.pathname === '/api/admin/confirm-match') {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
-        const { pairId, confirmed } = await request.json();
+        const { pairId, confirmed } = await readJson(request);
         const newStatus = confirmed ? 'confirmed' : 'rejected';
-        
+
         await env.DB.prepare(`
-          UPDATE face_verifications 
-          SET status = ?, updated_at = CURRENT_TIMESTAMP 
+          UPDATE face_verifications
+          SET status = ?, updated_at = CURRENT_TIMESTAMP
           WHERE id = ? OR (face1_id || '-' || face2_id) = ?
         `).bind(newStatus, pairId, pairId).run();
 
@@ -568,17 +636,17 @@ export default {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
         const sessionId = upload[1]; const session = await env.DB.prepare("SELECT id FROM sessions WHERE id = ? AND status = 'draft'").bind(sessionId).first();
         if (!session) return error('Create a draft session before uploading.', request, env, 404);
-        const form = await request.formData(); const file = form.get('file'); const preview = form.get('preview');
-        if (!(file instanceof File) || !(preview instanceof File) || !file.type.startsWith('image/')) return error('An image and its preview are required.', request, env);
+        const form = await readForm(request, 32 * 1024 * 1024); const file = form.get('file'); const preview = form.get('preview');
+        if (!(file instanceof File) || !(preview instanceof File) || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || preview.type !== 'image/jpeg' || !file.size || file.size > 25 * 1024 * 1024 || !preview.size || preview.size > 5 * 1024 * 1024) return error('An image and its preview are required.', request, env);
         const photoId = id(); const filename = safeFilename(file.name); const objectKey = `sessions/${sessionId}/original/${photoId}-${filename}`; const previewKey = `sessions/${sessionId}/preview/${photoId}.jpg`;
         await Promise.all([
           env.PHOTOS.put(objectKey, file.stream(), { httpMetadata: { contentType: file.type } }),
           env.PHOTOS.put(previewKey, preview.stream(), { httpMetadata: { contentType: 'image/jpeg' } }),
         ]);
         await env.DB.prepare("INSERT INTO photos (id, session_id, object_key, preview_key, filename, content_type, indexing_status) VALUES (?, ?, ?, ?, ?, ?, 'pending')").bind(photoId, sessionId, objectKey, previewKey, filename, file.type).run();
-        
+
         ctx.waitUntil(processFaces(env, photoId, objectKey));
-        
+
         return response({ photoId, status: 'pending' }, request, env, 201);
       }
 
@@ -605,8 +673,9 @@ export default {
 
       return error('Not found', request, env, 404);
     } catch (caught) {
+      if (caught instanceof RequestError) return error(caught.message, request, env, caught.status);
       console.error(caught);
-      return error(caught instanceof Error ? caught.message : 'Unexpected server error.', request, env, 500);
+      return error('We couldn’t complete that request. Please try again shortly.', request, env, 500);
     }
   },
 };

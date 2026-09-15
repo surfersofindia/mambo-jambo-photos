@@ -1,209 +1,127 @@
+'use strict';
 const $ = (selector) => document.querySelector(selector);
 const apiBase = (window.MJ_CONFIG?.apiUrl || '').replace(/\/$/, '');
-const isLive = Boolean(apiBase);
-const money = (paise, currency = 'INR') => new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 0 }).format(paise / 100);
-const apiUrl = (path) => path.startsWith('http') ? path : `${apiBase}${path}`;
-
-document.documentElement.classList.add('js');
-const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-const scrollProgress = $('.scroll-progress i');
-const hero = $('.hero');
-const heroCopy = $('.hero-copy');
-const heroImage = $('.hero-image');
-let scrollTicking = false;
-function updateScrollMotion() {
-  const y = window.scrollY;
-  const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
-  scrollProgress.style.setProperty('--progress', `${(y / maxScroll) * 100}%`);
-  if (!prefersReducedMotion.matches) {
-    const heroDistance = Math.min(y, 720);
-    hero.style.setProperty('--hero-opacity', `${Math.max(.1, 1 - heroDistance / 900)}`);
-    heroCopy.style.setProperty('--scroll-offset', `${heroDistance * -.12}px`);
-    heroImage.style.setProperty('--image-scroll', `${heroDistance * .07}px`);
-  }
-  scrollTicking = false;
+let sessions = [], selectedFile = null, previewUrl = null, photos = [], favourites = new Set(), favouritesOnly = false, photoIndex = 0, searchController = null;
+const status = (message = '', error = false) => { $('#finderStatus').textContent = message; $('#finderStatus').classList.toggle('error', error); };
+async function requestApi(path, options = {}) {
+  if (!apiBase) throw new Error('Photo search is not available yet. Please check back soon.');
+  const response = await fetch(`${apiBase}${path}`, { ...options, signal: options.signal || AbortSignal.timeout(20000) });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'We couldn’t complete that request. Please try again.');
+  return data;
 }
-window.addEventListener('scroll', () => { if (!scrollTicking) { scrollTicking = true; requestAnimationFrame(updateScrollMotion); } }, { passive: true });
-window.addEventListener('resize', updateScrollMotion);
-updateScrollMotion();
-
-document.querySelectorAll('[data-enter]').forEach((el, index) => el.style.setProperty('--enter-order', index));
-requestAnimationFrame(() => document.querySelectorAll('[data-enter]').forEach((el) => el.classList.add('is-visible')));
-const revealObserver = new IntersectionObserver((entries) => entries.forEach((entry) => {
-  if (entry.isIntersecting) { entry.target.classList.add('is-visible'); revealObserver.unobserve(entry.target); }
-}), { threshold: 0.16 });
-document.querySelectorAll('[data-reveal]').forEach((el) => revealObserver.observe(el));
-
-document.querySelectorAll('.ripple').forEach((button) => button.addEventListener('click', (event) => {
-  const ring = document.createElement('i');
-  ring.className = 'ripple-ring';
-  const box = button.getBoundingClientRect();
-  ring.style.left = `${event.clientX - box.left}px`; ring.style.top = `${event.clientY - box.top}px`;
-  button.append(ring); ring.addEventListener('animationend', () => ring.remove());
-}));
-document.querySelectorAll('[data-tilt]').forEach((card) => {
-  card.addEventListener('pointermove', (event) => {
-    if (prefersReducedMotion.matches) return;
-    const box = card.getBoundingClientRect();
-    card.style.setProperty('--ry', `${((event.clientX - box.left) / box.width - .5) * 5}deg`);
-    card.style.setProperty('--rx', `${((event.clientY - box.top) / box.height - .5) * -5}deg`);
-  });
-  card.addEventListener('pointerleave', () => { card.style.setProperty('--rx', '0deg'); card.style.setProperty('--ry', '0deg'); });
-});
-
-async function requestApi(path, options = {}, admin = false) {
-  if (!isLive) throw new Error('The live API is not configured yet. Add the deployed Worker URL to config.js.');
-  const headers = { ...(typeof options.body === 'string' ? { 'content-type': 'application/json' } : {}), ...(options.headers || {}) };
-  if (admin) headers.authorization = `Bearer ${sessionStorage.getItem('mj-admin-token') || ''}`;
-  const response = await fetch(apiUrl(path), { ...options, headers });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error || 'Something went wrong. Please try again.');
-  return body;
+function dateLabel(value) {
+  const date = new Date(`${value}T12:00:00`);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 }
-
-
-function imageFromFile(file) {
-  return new Promise((resolve, reject) => {
-    const image = new Image(); const url = URL.createObjectURL(file);
-    image.onload = () => { URL.revokeObjectURL(url); resolve(image); };
-    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('This image could not be read. Try a JPG or PNG.')); };
-    image.src = url;
-  });
+function stage(name) {
+  for (const value of ['session', 'selfie', 'matching']) $(`#${value}Stage`).hidden = value !== name;
+  $('#step1').classList.toggle('active', name === 'session');
+  $('#step2').classList.toggle('active', name === 'selfie');
+  $('#step3').classList.toggle('active', name === 'matching');
+  status();
 }
-
-async function watermarkedPreview(file) {
-  const image = await imageFromFile(file); const max = 1400;
-  const scale = Math.min(1, max / Math.max(image.width, image.height));
-  const canvas = document.createElement('canvas'); canvas.width = Math.round(image.width * scale); canvas.height = Math.round(image.height * scale);
-  const context = canvas.getContext('2d'); context.drawImage(image, 0, 0, canvas.width, canvas.height);
-  context.save(); context.translate(canvas.width / 2, canvas.height / 2); context.rotate(-Math.PI / 7);
-  context.globalAlpha = .68; context.fillStyle = '#ffffff'; context.font = `700 ${Math.max(20, Math.round(canvas.width / 18))}px Work Sans, sans-serif`;
-  context.textAlign = 'center'; context.fillText('MAMBO JAMBO  •  PREVIEW', 0, 0); context.restore();
-  return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), 'image/jpeg', .82));
-}
-
-const uploadStage = $('#uploadStage');
-const sessionStage = $('#sessionStage');
-const matchingStage = $('#matchingStage');
-const sessionOptions = $('#sessionOptions');
-const galleryImages = ['assets/backpackers-01.webp', 'assets/backpackers-04.webp', 'assets/backpackers-05.webp', 'assets/backpackers-06.webp', 'assets/backpackers-07.webp', 'assets/backpackers-10.webp', 'assets/backpackers-12.webp', 'assets/mambo-jambo-surf-session.jpg'];
-let selfieEmbedding = null;
-let selectedSession = null;
-let activeSearch = null;
-let unlockedPhotos = [];
-
-$('#startFinding').addEventListener('click', () => $('#finder').scrollIntoView({ behavior: 'smooth' }));
-const privacyConsent = $('#privacyConsent');
-const uploadLabel = $('#uploadLabel');
-const selfieInput = $('#selfieInput');
-privacyConsent.addEventListener('change', () => {
-  const allowed = privacyConsent.checked;
-  selfieInput.disabled = !allowed;
-  uploadLabel.classList.toggle('disabled', !allowed);
-});
-function setUploadMessage(message) { uploadStage.querySelector('p').textContent = message; }
-function demoSessionOptions() {
-  sessionOptions.innerHTML = '<button class="session selected" data-session-id="demo"><span>Today</span><small>Choose this session</small></button><button class="session" data-session-id="demo"><span>Yesterday</span><small>Sample matching flow</small></button><button class="session" data-session-id="demo"><span>Older session</span><small>Available when live</small></button>';
-  selectedSession = { id: 'demo', title: 'Morning glass', date: 'Sunday, 14 Sept', location: 'Mulki' };
+function chooseSession(id) {
+  if (searchController) searchController.abort();
+  $('#sessionSelect').value = id;
+  $('#main').hidden = false; $('#results').hidden = true;
+  stage('selfie'); $('#finder').scrollIntoView(); $('#changeSession').focus({ preventScroll: true });
 }
 async function loadSessions() {
-  if (!isLive) return demoSessionOptions();
-  const { sessions } = await requestApi('/api/sessions');
-  if (!sessions.length) throw new Error('No photo sessions have been published yet.');
-  selectedSession = sessions[0];
-  sessionOptions.innerHTML = sessions.slice(0, 3).map((session, index) => `<button class="session ${index === 0 ? 'selected' : ''}" data-session-id="${session.id}"><span>${session.title}</span><small>${session.session_date} · ${session.location}</small></button>`).join('');
-}
-selfieInput.addEventListener('change', async (event) => {
-  const file = event.target.files[0]; if (!file) return;
-  $('#selfiePreview').src = URL.createObjectURL(file);
+  $('#retrySessions').hidden = true; $('#sessionSelect').disabled = true; $('#nextStep').disabled = true;
+  status('Loading available sessions…');
   try {
-    if (isLive) {
-      setUploadMessage('Ready to find matches...');
-      await loadSessions();
-    } else demoSessionOptions();
-    uploadStage.classList.add('hidden'); sessionStage.classList.remove('hidden');
-  } catch (caught) { setUploadMessage(caught.message || 'Could not process that selfie. Please try another image.'); }
-});
-sessionOptions.addEventListener('click', (event) => {
-  const button = event.target.closest('.session'); if (!button) return;
-  document.querySelectorAll('.session').forEach((item) => item.classList.remove('selected')); button.classList.add('selected');
-  if (isLive) selectedSession = { id: button.dataset.sessionId };
-});
-$('#findMatches').addEventListener('click', async () => {
-  sessionStage.classList.add('hidden'); matchingStage.classList.remove('hidden');
-  try {
-    if (!isLive) { window.setTimeout(() => showResults(), 1800); return; }
-    
-    const file = selfieInput.files[0];
-    const form = new FormData();
-    form.append('sessionId', selectedSession.id);
-    form.append('file', file);
-    
-    const match = await requestApi('/api/match', { method: 'POST', body: form });
-    showResults(match);
-  } catch (caught) { matchingStage.classList.add('hidden'); sessionStage.classList.remove('hidden'); alert(caught.message || 'Could not find your photos. Please try again.'); }
-});
-
-function showResults(match) {
-  $('#results').classList.remove('hidden'); matchingStage.classList.add('hidden');
-  const unlockButton = $('#unlockPhotos'); const downloadButton = $('#downloadAll');
-  const banner = $('#indexingBanner');
-  if (match) {
-    activeSearch = match; unlockedPhotos = [];
-    $('#resultsMeta').textContent = `${match.session.date} · ${match.session.location}`.toUpperCase();
-    if (match.count > 0) {
-      $('#resultsTitle').innerHTML = match.indexingNote ? `We found <em>${match.count}</em> shot${match.count > 1 ? 's' : ''}<br />so far...` : `We found <em>${match.count}</em> shot${match.count > 1 ? 's' : ''}<br />with your name on ’em.`;
-      $('#resultsCopy').textContent = `Here are your watermarked previews. Unlock the full set for ${money(match.pricePaise, match.currency)}.`;
-      if (match.indexingNote) {
-        banner.innerHTML = `<span class="indexing-banner-icon">🌊</span><div>${match.indexingNote}</div>`;
-        banner.classList.remove('hidden');
-      } else {
-        banner.classList.add('hidden');
-      }
-    } else {
-      $('#resultsTitle').innerHTML = 'Housekeeping in progress...';
-      $('#resultsCopy').textContent = match.indexingNote || 'Try a clearer selfie, or ask our crew to take another look.';
-      banner.classList.add('hidden');
+    const data = await requestApi('/api/sessions');
+    if (!Array.isArray(data.sessions)) throw new Error('Sessions could not be loaded. Please try again.');
+    sessions = data.sessions;
+    $('#sessionSelect').replaceChildren(new Option(sessions.length ? 'Choose your surf session' : 'No sessions published yet', ''));
+    for (const session of sessions) $('#sessionSelect').add(new Option(`${dateLabel(session.session_date)} · ${session.title} · ${session.location}`, session.id));
+    $('#sessionSelect').disabled = !sessions.length;
+    $('#sessionCards').replaceChildren();
+    if (!sessions.length) { $('#sessionCards').textContent = 'The next batch of memories is on its way. Check back after your session.'; status('Your crew hasn’t published any sessions yet. Check back soon.'); return; }
+    for (const session of sessions.slice(0, 3)) {
+      const button = document.createElement('button'); button.className = 'session-card'; button.type = 'button';
+      const img = document.createElement('img'); img.src = 'assets/mambo-jambo-surf-session.jpg'; img.alt = 'Mambo Jambo surf school — illustrative session photo'; img.loading = 'lazy';
+      const date = document.createElement('small'); date.textContent = dateLabel(session.session_date).toUpperCase();
+      const title = document.createElement('h3'); title.textContent = `${session.title} ↗`;
+      const location = document.createElement('p'); location.textContent = `${session.location} · Find your photos`;
+      button.append(img, date, title, location); button.addEventListener('click', () => chooseSession(session.id)); $('#sessionCards').append(button);
     }
-    unlockButton.textContent = `Unlock full set · ${money(match.pricePaise, match.currency)}`; unlockButton.classList.toggle('hidden', !match.count); downloadButton.classList.add('hidden');
-    $('#gallery').innerHTML = match.previews.map((photo, index) => `<figure class="preview" style="animation-delay:${.18 + index * .065}s"><img src="${apiUrl(photo.url)}" alt="Your watermarked surf-session preview"><div class="payment-lock">MATCH ${photo.score}% · UNLOCK TO DOWNLOAD</div></figure>`).join('');
-  } else {
-    banner.classList.add('hidden');
-    $('#resultsMeta').textContent = 'SUNDAY, 14 SEPT · MULKI';
-    $('#resultsTitle').innerHTML = 'We found <em>18</em> shots<br />with your name on ’em.';
-    $('#resultsCopy').textContent = 'This demo has no payment account attached yet. The live version shows watermarked previews until payment succeeds.';
-    unlockButton.classList.add('hidden'); downloadButton.classList.remove('hidden');
-    $('#gallery').innerHTML = galleryImages.map((src, index) => `<figure style="animation-delay:${.18 + index * .065}s"><img src="${src}" alt="Your Mambo Jambo session photo ${index + 1}"><button title="Save favourite">♡</button></figure>`).join('');
+    status();
+  } catch (error) {
+    $('#sessionSelect').replaceChildren(new Option('Sessions currently unavailable', '')); $('#retrySessions').hidden = false;
+    status(error.name === 'TimeoutError' ? 'Loading took too long. Please try again.' : error.message, true);
+    $('#sessionCards').textContent = 'We couldn’t load the sessions. Use “Try loading sessions again” above to retry.';
   }
-  window.scrollTo(0, 0);
 }
-$('#backHome').addEventListener('click', () => $('#results').classList.add('hidden'));
-$('#gallery').addEventListener('click', (event) => { if (event.target.tagName === 'BUTTON') { const saved = event.target.textContent === '♡'; event.target.textContent = saved ? '♥' : '♡'; event.target.classList.toggle('saved', saved); } });
-
-function loadRazorpay() { return window.Razorpay ? Promise.resolve(window.Razorpay) : loadScript('https://checkout.razorpay.com/v1/checkout.js').then(() => window.Razorpay); }
-async function unlockPaidGallery(payload) {
-  unlockedPhotos = payload.photos;
-  $('#gallery').innerHTML = payload.photos.map((photo, index) => `<figure class="unlocked" style="animation-delay:${.12 + index * .055}s"><img src="${apiUrl(photo.url)}" alt="Your full-resolution surf-session photo"><div class="photo-actions"><a class="dl-btn" href="${apiUrl(photo.url)}" download title="Download this photo">↓</a><button title="Save favourite">♡</button></div></figure>`).join('');
-  $('#resultsCopy').textContent = 'Payment confirmed — your full-resolution photos are ready to download.';
-  $('#unlockPhotos').classList.add('hidden'); $('#downloadAll').classList.remove('hidden');
-}
-$('#unlockPhotos').addEventListener('click', async () => {
+$('#retrySessions').addEventListener('click', loadSessions);
+$('#sessionSelect').addEventListener('change', () => { $('#nextStep').disabled = !$('#sessionSelect').value; });
+$('#nextStep').addEventListener('click', () => chooseSession($('#sessionSelect').value));
+$('#changeSession').addEventListener('click', () => { stage('session'); $('#sessionSelect').focus(); });
+function updateSubmit() { $('#findMatches').disabled = !selectedFile || !$('#privacyConsent').checked; }
+$('#privacyConsent').addEventListener('change', updateSubmit);
+$('#selfieInput').addEventListener('change', async (event) => {
+  selectedFile = null; updateSubmit(); status();
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  previewUrl = null; $('#selfiePreview').hidden = true; $('#selfiePreview').removeAttribute('src'); $('#uploadPrompt').hidden = false;
+  const file = event.target.files[0]; if (!file) return;
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 10 * 1024 * 1024 || !file.size) { status('Choose a JPG, PNG or WebP image smaller than 10 MB.', true); event.target.value = ''; return; }
+  const url = URL.createObjectURL(file); previewUrl = url;
   try {
-    const button = $('#unlockPhotos'); button.disabled = true; button.textContent = 'Opening secure checkout…';
-    const checkout = await requestApi('/api/checkout', { method: 'POST', body: JSON.stringify({ searchId: activeSearch.searchId, token: activeSearch.token }) });
-    const Razorpay = await loadRazorpay();
-    const razorpay = new Razorpay({
-      key: checkout.keyId, amount: checkout.amount, currency: checkout.currency, name: checkout.name, description: 'Full-resolution surf photos', order_id: checkout.orderId, theme: { color: '#3070a0' },
-      handler: async (payment) => {
-        try { await unlockPaidGallery(await requestApi('/api/payment/verify', { method: 'POST', body: JSON.stringify({ searchId: activeSearch.searchId, token: activeSearch.token, ...payment }) })); }
-        catch (caught) { alert(caught.message || 'We could not confirm this payment yet. Please contact the surf school with your payment ID.'); }
-      },
-      modal: { ondismiss: () => { button.disabled = false; button.textContent = `Unlock full set · ${money(activeSearch.pricePaise, activeSearch.currency)}`; } },
-    });
-    razorpay.open();
-  } catch (caught) {
-    $('#unlockPhotos').disabled = false; $('#unlockPhotos').textContent = activeSearch ? `Unlock full set · ${money(activeSearch.pricePaise, activeSearch.currency)}` : 'Unlock full set';
-    alert(caught.message || 'Checkout could not open. Please try again.');
-  }
+    const image = new Image(); image.src = url; await image.decode();
+    if (previewUrl !== url) return;
+    selectedFile = file; $('#selfiePreview').src = url; $('#selfiePreview').hidden = false; $('#uploadPrompt').hidden = true; updateSubmit();
+  } catch { if (previewUrl === url) { URL.revokeObjectURL(url); previewUrl = null; status('That image couldn’t be opened. Please choose another photo.', true); } }
 });
-$('#downloadAll').addEventListener('click', () => { if (!unlockedPhotos.length) return alert('Downloads are available after payment.'); unlockedPhotos.forEach((photo) => window.open(apiUrl(photo.url), '_blank', 'noopener')); });
+$('#cancelSearch').addEventListener('click', () => { searchController?.abort(); });
+$('#searchForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (searchController || !selectedFile || !$('#privacyConsent').checked || !$('#sessionSelect').value) return;
+  stage('matching'); status('Matching your selfie…');
+  const controller = new AbortController(); searchController = controller;
+  let timedOut = false; const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 90000);
+  const form = new FormData(); form.append('sessionId', $('#sessionSelect').value); form.append('file', selectedFile); form.append('consent', 'true');
+  try {
+    const match = await requestApi('/api/match', { method: 'POST', body: form, signal: controller.signal });
+    if (controller.signal.aborted) return;
+    if (!Array.isArray(match.previews) || !match.session) throw new Error('The search response was incomplete. Please try again.');
+    photos = match.previews.map(photo => {
+      const url = new URL(photo.url, apiBase);
+      if (url.origin !== new URL(apiBase).origin || !url.pathname.startsWith('/api/media/')) throw new Error('An invalid photo link was returned. Please try again.');
+      return { ...photo, url: url.href };
+    });
+    favourites.clear(); favouritesOnly = false; $('#favouritesFilter').setAttribute('aria-pressed', 'false');
+    $('#resultsMeta').textContent = `${dateLabel(match.session.date)} · ${match.session.location} · ${match.session.title}`;
+    $('#resultsTitle').textContent = photos.length ? `${photos.length} moments. All yours.` : 'No matches this time.';
+    $('#resultsCopy').textContent = photos.length ? 'A little salt, a little sunshine, and you. Tap a photo for a closer look.' : 'Try a brighter selfie without sunglasses, or check that you chose the right session.';
+    $('#indexingBanner').textContent = match.indexingNote || ''; $('#indexingBanner').hidden = !match.indexingNote;
+    renderGallery(); $('#main').hidden = true; $('#results').hidden = false; stage('selfie'); window.scrollTo(0, 0); $('#resultsTitle').focus();
+  } catch (error) { stage('selfie'); status(error.name === 'AbortError' ? (timedOut ? 'The search took too long. Please try again.' : 'Search cancelled. You can try again when you’re ready.') : error.message, error.name !== 'AbortError' || timedOut); }
+  finally { clearTimeout(timeout); searchController = null; }
+});
+function renderGallery() {
+  $('#gallery').replaceChildren(); $('#favouriteCount').textContent = favourites.size;
+  $('#galleryEmpty').hidden = !favouritesOnly || favourites.size > 0;
+  photos.forEach((photo, index) => {
+    if (favouritesOnly && !favourites.has(index)) return;
+    const figure = document.createElement('figure');
+    const open = document.createElement('button'); open.className = 'photo-open'; open.setAttribute('aria-label', `Enlarge photo ${index + 1}`);
+    const img = document.createElement('img'); img.src = photo.url; img.alt = `Surf session preview ${index + 1}`; img.loading = 'lazy';
+    img.addEventListener('error', () => { img.alt = 'Preview unavailable. Run a new search to refresh expired links.'; });
+    open.append(img); open.addEventListener('click', () => openPhoto(index));
+    const favourite = document.createElement('button'); favourite.className = 'favourite'; favourite.textContent = favourites.has(index) ? '♥' : '♡'; favourite.setAttribute('aria-label', `Favourite photo ${index + 1}`); favourite.setAttribute('aria-pressed', String(favourites.has(index))); favourite.dataset.index = index;
+    favourite.addEventListener('click', () => { favourites.has(index) ? favourites.delete(index) : favourites.add(index); renderGallery(); ($('#gallery').querySelector(`[data-index="${index}"]`) || $('#favouritesFilter')).focus(); });
+    const caption = document.createElement('figcaption'); caption.textContent = `MOMENT ${String(index + 1).padStart(2, '0')} · PREVIEW`;
+    figure.append(open, favourite, caption); $('#gallery').append(figure);
+  });
+}
+$('#favouritesFilter').addEventListener('click', () => { favouritesOnly = !favouritesOnly; $('#favouritesFilter').setAttribute('aria-pressed', String(favouritesOnly)); renderGallery(); });
+function openPhoto(index) { photoIndex = (index + photos.length) % photos.length; $('#lightboxImage').src = photos[photoIndex].url; $('#lightboxCount').textContent = `${photoIndex + 1} of ${photos.length}`; if (!$('#lightbox').open) $('#lightbox').showModal(); }
+$('#closeLightbox').addEventListener('click', () => $('#lightbox').close());
+$('#previousPhoto').addEventListener('click', () => openPhoto(photoIndex - 1)); $('#nextPhoto').addEventListener('click', () => openPhoto(photoIndex + 1));
+$('#lightbox').addEventListener('keydown', event => { if (event.key === 'ArrowLeft') { event.preventDefault(); openPhoto(photoIndex - 1); } if (event.key === 'ArrowRight') { event.preventDefault(); openPhoto(photoIndex + 1); } });
+function returnToSearch() { $('#results').hidden = true; $('#main').hidden = false; $('#finder').scrollIntoView(); $('#changeSession').focus({ preventScroll: true }); }
+$('#backHome').addEventListener('click', returnToSearch);
+document.querySelectorAll('a[href^="#"]').forEach(link => link.addEventListener('click', () => { searchController?.abort(); $('#main').hidden = false; $('#results').hidden = true; }));
+window.addEventListener('pagehide', event => { if (!event.persisted && previewUrl) URL.revokeObjectURL(previewUrl); searchController?.abort(); });
+loadSessions();

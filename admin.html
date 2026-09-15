@@ -748,6 +748,7 @@
       }
       .reject-btn:hover { background: rgba(208,96,80,0.35); transform: translateY(-1px); }
     </style>
+  <link rel="stylesheet" href="admin-theme.css" />
   </head>
   <body>
     <header class="topbar">
@@ -805,7 +806,7 @@
               <input id="adminLocation" type="text" value="Mulki Beach" maxlength="80" required placeholder="e.g. Mulki Beach" />
             </div>
             <div class="field">
-              <label for="adminPrice">Photo-pack price (₹)</label>
+              <label for="adminPrice">Future photo-pack price (₹) · on hold</label>
               <input id="adminPrice" type="number" value="299" min="1" step="1" required />
             </div>
           </div>
@@ -813,9 +814,9 @@
           <div class="drop-zone" id="adminDropZone">
             <span class="drop-icon">⬆</span>
             <h3>Drop today's session here</h3>
-            <p>Photos are uploaded instantly and indexed in the background.<br />Guests only see watermarked previews before payment.</p>
+            <p>Photos are uploaded instantly and indexed in the background.<br />Guests can browse watermarked previews. Payments and downloads are on hold.</p>
             <label class="choose-btn" for="adminPhotoInput">Choose photos ↑</label>
-            <input id="adminPhotoInput" type="file" accept="image/*" multiple hidden />
+            <input id="adminPhotoInput" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden />
           </div>
 
           <div class="upload-status" id="uploadStatus"></div>
