@@ -433,6 +433,66 @@
       }
       .error-msg { color: var(--coral); }
 
+      /* ── Live Indexing Status Badges & Progress ── */
+      .indexing-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font: 9px var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 3px 9px;
+        border-radius: 20px;
+        font-weight: 700;
+      }
+      .indexing-badge.done {
+        background: rgba(76,175,80,0.15);
+        color: #4caf50;
+        border: 1px solid rgba(76,175,80,0.3);
+      }
+      .indexing-badge.processing {
+        background: rgba(248,232,56,0.15);
+        color: var(--marker);
+        border: 1px solid rgba(248,232,56,0.35);
+      }
+      .indexing-badge.warning {
+        background: rgba(208,96,80,0.15);
+        color: var(--coral);
+        border: 1px solid rgba(208,96,80,0.35);
+      }
+      .indexing-badge.empty {
+        background: rgba(255,255,255,0.06);
+        color: var(--muted);
+        border: 1px solid var(--border);
+      }
+      .pulse-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--marker);
+        box-shadow: 0 0 0 rgba(248,232,56,0.7);
+        animation: pulseAnimation 1.5s infinite;
+      }
+      @keyframes pulseAnimation {
+        0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(248,232,56,0.7); }
+        70% { transform: scale(1.15); box-shadow: 0 0 0 5px rgba(248,232,56,0); }
+        100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(248,232,56,0); }
+      }
+      .card-progress-track {
+        height: 5px;
+        background: rgba(255,255,255,0.08);
+        border-radius: 3px;
+        overflow: hidden;
+        margin-top: 14px;
+        margin-bottom: 2px;
+      }
+      .card-progress-fill {
+        height: 100%;
+        background: linear-gradient(90deg, var(--ocean), var(--marker));
+        border-radius: 3px;
+        transition: width 0.4s ease;
+      }
+
       /* ── Dashboard Metrics ── */
       .metrics-grid {
         display: grid;

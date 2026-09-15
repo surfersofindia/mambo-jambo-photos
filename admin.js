@@ -359,25 +359,53 @@ async function loadDashboard(silent = false) {
 
     let hasPending = false;
     grid.innerHTML = sessions.map((s) => {
-      const isDone = s.total_photos > 0 && s.indexed_photos === s.total_photos;
-      if (!isDone && s.status !== 'draft') hasPending = true;
-      const indexedStr = isDone ? '✓ Done' : `${s.indexed_photos || 0} / ${s.total_photos || '?'}`;
+      const total = Number(s.total_photos || 0);
+      const indexed = Number(s.indexed_photos || 0);
+      const pending = Number(s.pending_photos || 0);
+      const failed = Number(s.failed_photos || 0);
+      const pct = total > 0 ? Math.round((indexed / total) * 100) : 0;
+      const isDone = total > 0 && indexed === total;
+
+      if (pending > 0) hasPending = true;
+
+      let badgeHtml = '';
+      if (total === 0) {
+        badgeHtml = `<span class="indexing-badge empty">No Photos Uploaded</span>`;
+      } else if (isDone) {
+        badgeHtml = `<span class="indexing-badge done">✓ Indexing Complete</span>`;
+      } else if (pending > 0) {
+        badgeHtml = `<span class="indexing-badge processing"><span class="pulse-dot"></span> Indexing (${pct}%)</span>`;
+      } else if (failed > 0) {
+        badgeHtml = `<span class="indexing-badge warning">⚠️ ${failed} Failed</span>`;
+      } else {
+        badgeHtml = `<span class="indexing-badge processing">${pct}% Indexed</span>`;
+      }
+
       const priceRs = Math.round((s.price_paise || 29900) / 100);
 
       return `
         <div class="d-card">
           <div class="d-card-head">
             <span class="d-card-title">${escHtml(s.title)}</span>
-            <span class="d-card-status ${s.status}">${s.status}</span>
+            <div style="display:flex;gap:8px;align-items:center;">
+              ${badgeHtml}
+              <span class="d-card-status ${s.status}">${s.status}</span>
+            </div>
           </div>
           <div class="d-card-stats">
             <div><span>Date</span><strong style="font-size:13px;font-weight:500">${escHtml(s.date || '—')}</strong></div>
-            <div><span>Photos</span><strong>${indexedStr}</strong></div>
+            <div><span>Location</span><strong style="font-size:13px;font-weight:500">${escHtml(s.location || '—')}</strong></div>
+            <div><span>Indexing Progress</span><strong>${pct}% (${indexed} / ${total})</strong></div>
             <div><span>Downloads</span><strong>${s.downloads}</strong></div>
             <div class="spacer"></div>
           </div>
+          ${total > 0 ? `
+            <div class="card-progress-track">
+              <div class="card-progress-fill" style="width: ${pct}%;"></div>
+            </div>
+          ` : ''}
           <div class="action-group">
-            <button class="btn-sm btn-primary-sm view-photos-btn" data-session-id="${escHtml(s.id)}" data-session-title="${escHtml(s.title)}">📷 View Photos (${s.total_photos || 0})</button>
+            <button class="btn-sm btn-primary-sm view-photos-btn" data-session-id="${escHtml(s.id)}" data-session-title="${escHtml(s.title)}">📷 View Photos (${total})</button>
             <button class="btn-sm edit-session-btn" data-session-id="${escHtml(s.id)}" data-title="${escHtml(s.title)}" data-date="${escHtml(s.date || '')}" data-location="${escHtml(s.location || '')}" data-price="${priceRs}" data-status="${s.status}">✏️ Edit</button>
             <button class="btn-sm reindex-btn" data-session-id="${escHtml(s.id)}">🔄 Re-index</button>
             <button class="delete-btn" data-session-id="${escHtml(s.id)}">Delete</button>
@@ -387,7 +415,7 @@ async function loadDashboard(silent = false) {
     }).join('');
 
     if (hasPending && !dashInterval) {
-      dashInterval = setInterval(() => loadDashboard(true), 5000);
+      dashInterval = setInterval(() => loadDashboard(true), 3000);
     } else if (!hasPending && dashInterval) {
       clearInterval(dashInterval); dashInterval = null;
     }

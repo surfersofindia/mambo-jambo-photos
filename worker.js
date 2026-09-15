@@ -272,9 +272,11 @@ export default {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
         const query = `
           SELECT 
-            s.id, s.title, s.session_date as date, s.location, s.status,
+            s.id, s.title, s.session_date as date, s.location, s.status, s.price_paise,
             COUNT(DISTINCT p.id) as total_photos,
             SUM(CASE WHEN p.indexing_status = 'completed' THEN 1 ELSE 0 END) as indexed_photos,
+            SUM(CASE WHEN p.indexing_status = 'pending' THEN 1 ELSE 0 END) as pending_photos,
+            SUM(CASE WHEN p.indexing_status = 'failed' THEN 1 ELSE 0 END) as failed_photos,
             (SELECT COUNT(*) FROM searches sr WHERE sr.session_id = s.id AND sr.status = 'paid') as downloads
           FROM sessions s
           LEFT JOIN photos p ON p.session_id = s.id
