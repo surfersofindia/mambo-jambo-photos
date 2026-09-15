@@ -278,6 +278,16 @@ export default {
         return response({ success: true }, request, env);
       }
 
+      const reindex = url.pathname.match(/^\/api\/admin\/reindex$/);
+      if (request.method === 'POST' && reindex) {
+        if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
+        const unindexed = await env.DB.prepare("SELECT id, object_key FROM photos WHERE indexing_status != 'completed'").all();
+        for (const p of unindexed.results) {
+          await processFaces(env, p.id, p.object_key);
+        }
+        return response({ reindexed: unindexed.results.length }, request, env);
+      }
+
       const upload = url.pathname.match(/^\/api\/admin\/sessions\/([\w-]+)\/photos$/);
       if (request.method === 'POST' && upload) {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
