@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mambo Jambo — Admin</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Work+Sans:ital,wght@0,400;0,500;0,600;0,700;1,500&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --ink: #302818;
+        --cream: #f8f8f8;
+        --sand: #e7e2d6;
+        --coral: #d06050;
+        --ocean: #3070a0;
+        --sage: #a0b8b0;
+        --marker: #f8e838;
+        --mono: 'Space Mono', monospace;
+        --sans: 'Work Sans', sans-serif;
+        --serif: 'Work Sans', sans-serif;
+        --bg: #1a1510;
+        --surface: #252015;
+        --border: rgba(255,255,255,0.09);
+        --text: #f0ead8;
+        --muted: #a09880;
+      }
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      html { height: 100%; }
+      body {
+        min-height: 100%;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+        display: flex;
+        flex-direction: column;
+      }
+      button, input, select, textarea { font: inherit; }
+      button { cursor: pointer; border: 0; }
+
+      /* ── Top bar ── */
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 18px 32px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      .topbar-brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: -.6px;
+        color: var(--text);
+        text-decoration: none;
+      }
+      .topbar-brand img { height: 36px; width: 36px; object-fit: contain; }
+      .topbar-brand small {
+        display: block;
+        font: 9px var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        color: var(--marker);
+        margin-top: 2px;
+      }
+      .topbar-right { display: flex; align-items: center; gap: 16px; }
+      .back-link {
+        font: 10px var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: var(--muted);
+        text-decoration: none;
+        transition: color .2s;
+      }
+      .back-link:hover { color: var(--text); }
+      .sign-out-btn {
+        background: none;
+        color: var(--muted);
+        font: 10px var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        padding: 6px 12px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        transition: color .2s, border-color .2s;
+      }
+      .sign-out-btn:hover { color: var(--coral); border-color: var(--coral); }
+
+      /* ── Layout ── */
+      .admin-body {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 40px 32px 80px;
+        width: 100%;
+      }
+
+      /* ── Login ── */
+      .login-screen {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 40px 0;
+        gap: 0;
+      }
+      .login-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 48px 40px;
+        width: 100%;
+        max-width: 400px;
+      }
+      .login-card .eyebrow {
+        font: 10px var(--mono);
+        letter-spacing: 2px;
+        color: var(--marker);
+        margin-bottom: 10px;
+        display: block;
+      }
+      .login-card h2 {
+        font: 600 32px/1 var(--serif);
+        letter-spacing: -1.5px;
+        margin-bottom: 28px;
+      }
+      .login-card label {
+        display: block;
+        font: 10px var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+      .login-card input[type="password"] {
+        width: 100%;
+        background: rgba(255,255,255,.06);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 12px 14px;
+        color: var(--text);
+        font-size: 16px;
+        margin-bottom: 20px;
+        transition: border-color .2s;
+      }
+      .login-card input[type="password"]:focus {
+        outline: none;
+        border-color: var(--marker);
+      }
+      .login-error {
+        font: 11px var(--mono);
+        color: var(--coral);
+        margin-top: -12px;
+        margin-bottom: 16px;
+        min-height: 16px;
+      }
+
+      /* ── Tabs ── */
+      .tabs {
+        display: flex;
+        gap: 0;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 36px;
+      }
+      .tab-btn {
+        background: none;
+        color: var(--muted);
+        font: 11px var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        padding: 14px 22px;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -1px;
+        transition: color .2s, border-color .2s;
+      }
+      .tab-btn:hover { color: var(--text); }
+      .tab-btn.active {
+        color: var(--marker);
+        border-bottom-color: var(--marker);
+      }
+      .tab-panel { display: none; }
+      .tab-panel.active { display: block; }
+
+      /* ── Section titles ── */
+      .section-title {
+        font: 600 26px/1 var(--serif);
+        letter-spacing: -1px;
+        margin-bottom: 6px;
+      }
+      .section-sub {
+        font-size: 13px;
+        color: var(--muted);
+        margin-bottom: 28px;
+      }
+
+      /* ── Form fields ── */
+      .field-group {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+        margin-bottom: 20px;
+      }
+      @media (max-width: 600px) { .field-group { grid-template-columns: 1fr; } }
+      .field { display: flex; flex-direction: column; gap: 6px; }
+      .field label {
+        font: 10px var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: var(--muted);
+      }
+      .field input {
+        background: rgba(255,255,255,.06);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 10px 12px;
+        color: var(--text);
+        font-size: 14px;
+        transition: border-color .2s;
+      }
+      .field input:focus { outline: none; border-color: var(--marker); }
+
+      /* ── Drop zone ── */
+      .drop-zone {
+        border: 2px dashed var(--border);
+        border-radius: 10px;
+        padding: 40px 24px;
+        text-align: center;
+        cursor: pointer;
+        transition: border-color .2s, background .2s;
+        margin-bottom: 20px;
+        position: relative;
+      }
+      .drop-zone:hover, .drop-zone.dragging {
+        border-color: var(--marker);
+        background: rgba(248,232,56,.04);
+      }
+      .drop-zone .drop-icon {
+        font-size: 40px;
+        margin-bottom: 12px;
+        display: block;
+        opacity: .5;
+      }
+      .drop-zone h3 {
+        font: 600 18px var(--serif);
+        margin-bottom: 6px;
+      }
+      .drop-zone p {
+        font-size: 13px;
+        color: var(--muted);
+        margin-bottom: 18px;
+      }
+      .choose-btn {
+        display: inline-block;
+        background: var(--marker);
+        color: var(--ink);
+        font-weight: 700;
+        font-size: 13px;
+        padding: 11px 20px;
+        border-radius: 50px;
+        cursor: pointer;
+        transition: transform .2s, box-shadow .2s;
+      }
+      .choose-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 0 rgba(0,0,0,.3); }
+
+      /* ── Progress ── */
+      .progress-wrap { margin-bottom: 16px; }
+      .progress-bar-track {
+        height: 6px;
+        background: rgba(255,255,255,.08);
+        border-radius: 3px;
+        overflow: hidden;
+        margin-bottom: 8px;
+      }
+      .progress-bar-fill {
+        height: 100%;
+        background: linear-gradient(90deg, var(--ocean), var(--marker));
+        border-radius: 3px;
+        width: 0%;
+        transition: width .3s ease;
+      }
+      .progress-meta {
+        display: flex;
+        justify-content: space-between;
+        font: 10px var(--mono);
+        color: var(--muted);
+      }
+
+      /* ── Upload status ── */
+      .upload-status {
+        font: 12px var(--mono);
+        padding: 10px 14px;
+        border-radius: 6px;
+        background: rgba(255,255,255,.05);
+        border: 1px solid var(--border);
+        margin-bottom: 20px;
+        display: none;
+      }
+      .upload-status.visible { display: block; }
+      .upload-status.error { color: var(--coral); border-color: rgba(208,96,80,.3); }
+
+      /* ── Publish button ── */
+      .publish-btn {
+        background: var(--coral);
+        color: #fff;
+        font-weight: 700;
+        font-size: 15px;
+        padding: 15px 28px;
+        border-radius: 50px;
+        transition: transform .25s cubic-bezier(.34,1.56,.64,1), box-shadow .25s;
+        display: inline-block;
+        margin-top: 8px;
+      }
+      .publish-btn:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 9px 0 rgba(0,0,0,.3);
+      }
+      .publish-btn:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
+      .publish-btn span { font-size: 20px; margin-left: 14px; }
+
+      /* ── Dashboard cards ── */
+      .dashboard-grid {
+        display: grid;
+        gap: 14px;
+      }
+      .d-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 20px 24px;
+      }
+      .d-card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 14px;
+      }
+      .d-card-title { font: 600 16px var(--serif); }
+      .d-card-status {
+        font: 10px var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        padding: 3px 10px;
+        border-radius: 20px;
+        background: rgba(255,255,255,.07);
+        color: var(--muted);
+      }
+      .d-card-status.published { background: rgba(160,184,176,.15); color: var(--sage); }
+      .d-card-status.draft { background: rgba(248,232,56,.12); color: var(--marker); }
+      .d-card-status.archived { background: rgba(255,255,255,.05); color: var(--muted); }
+      .d-card-stats {
+        display: flex;
+        gap: 24px;
+        align-items: center;
+      }
+      .d-card-stats > div { display: flex; flex-direction: column; gap: 2px; }
+      .d-card-stats span { font: 9px var(--mono); text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+      .d-card-stats strong { font-size: 18px; font-weight: 700; }
+      .d-card-stats .spacer { flex: 1; }
+      .delete-btn {
+        background: rgba(208,96,80,.15);
+        color: var(--coral);
+        border: 1px solid rgba(208,96,80,.25);
+        font: 10px var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        padding: 7px 14px;
+        border-radius: 6px;
+        transition: background .2s, border-color .2s;
+      }
+      .delete-btn:hover {
+        background: rgba(208,96,80,.3);
+        border-color: var(--coral);
+      }
+      .refresh-link {
+        background: none;
+        color: var(--muted);
+        font: 10px var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        padding: 0;
+        text-decoration: underline;
+        transition: color .2s;
+        cursor: pointer;
+        border: none;
+      }
+      .refresh-link:hover { color: var(--text); }
+      .dashboard-header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin-bottom: 20px;
+      }
+      .loading-msg, .empty-msg {
+        color: var(--muted);
+        font: 12px var(--mono);
+        text-align: center;
+        padding: 40px 0;
+      }
+      .error-msg { color: var(--coral); }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="topbar-brand" href="/">
+        <img src="assets/mambo-jambo-logo.png" alt="" />
+        <span>Mambo Jambo <small>Admin</small></span>
+      </a>
+      <div class="topbar-right">
+        <a class="back-link" href="/">← Back to site</a>
+        <button class="sign-out-btn hidden" id="signOutBtn">Sign out</button>
+      </div>
+    </header>
+
+    <!-- ── Login screen ── -->
+    <div class="admin-body" id="loginScreen">
+      <div class="login-screen">
+        <div class="login-card">
+          <span class="eyebrow">BACKSTAGE ACCESS</span>
+          <h2>Admin login</h2>
+          <form id="loginForm">
+            <label for="adminPassword">Password</label>
+            <input id="adminPassword" type="password" autocomplete="current-password" placeholder="Enter admin password" required />
+            <div class="login-error" id="loginError"></div>
+            <button class="publish-btn" type="submit" style="width:100%;">Enter studio <span>→</span></button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Admin workspace ── -->
+    <div class="admin-body hidden" id="adminApp">
+      <nav class="tabs">
+        <button class="tab-btn active" data-tab="upload">📂 Upload Session</button>
+        <button class="tab-btn" data-tab="dashboard">📊 Dashboard</button>
+      </nav>
+
+      <!-- Upload tab -->
+      <div class="tab-panel active" id="tab-upload">
+        <h2 class="section-title">New session upload</h2>
+        <p class="section-sub">Fill in the session details, drop all the photos, then publish.</p>
+
+        <form id="uploadForm">
+          <div class="field-group">
+            <div class="field">
+              <label for="adminTitle">Session name</label>
+              <input id="adminTitle" type="text" value="Morning surf" maxlength="80" required placeholder="e.g. Morning glass" />
+            </div>
+            <div class="field">
+              <label for="adminDate">Session date</label>
+              <input id="adminDate" type="date" required />
+            </div>
+            <div class="field">
+              <label for="adminLocation">Beach / break</label>
+              <input id="adminLocation" type="text" value="Mulki Beach" maxlength="80" required placeholder="e.g. Mulki Beach" />
+            </div>
+            <div class="field">
+              <label for="adminPrice">Photo-pack price (₹)</label>
+              <input id="adminPrice" type="number" value="299" min="1" step="1" required />
+            </div>
+          </div>
+
+          <div class="drop-zone" id="adminDropZone">
+            <span class="drop-icon">⬆</span>
+            <h3>Drop today's session here</h3>
+            <p>Photos are uploaded instantly and indexed in the background.<br />Guests only see watermarked previews before payment.</p>
+            <label class="choose-btn" for="adminPhotoInput">Choose photos ↑</label>
+            <input id="adminPhotoInput" type="file" accept="image/*" multiple hidden />
+          </div>
+
+          <div class="upload-status" id="uploadStatus"></div>
+
+          <div class="progress-wrap hidden" id="progressWrap">
+            <div class="progress-bar-track">
+              <div class="progress-bar-fill" id="progressFill"></div>
+            </div>
+            <div class="progress-meta">
+              <span id="progressSpeed">0 KB/s</span>
+              <span id="progressEta">ETA: --</span>
+            </div>
+          </div>
+
+          <button class="publish-btn" type="submit" id="publishBtn">Publish photo pack <span>→</span></button>
+        </form>
+      </div>
+
+      <!-- Dashboard tab -->
+      <div class="tab-panel" id="tab-dashboard">
+        <div class="dashboard-header">
+          <div>
+            <h2 class="section-title">Session dashboard</h2>
+            <p class="section-sub">Background indexing status and download counts.</p>
+          </div>
+          <button class="refresh-link" id="refreshBtn">↻ Refresh</button>
+        </div>
+        <div class="dashboard-grid" id="dashboardGrid">
+          <p class="loading-msg">Loading sessions...</p>
+        </div>
+      </div>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="admin.js"></script>
+  </body>
+</html>

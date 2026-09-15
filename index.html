@@ -19,20 +19,19 @@
         <nav data-enter>
           <a class="brand" href="#home" aria-label="Mambo Jambo Surf School home"><img src="assets/mambo-jambo-logo.png" alt="" /><span>Mambo Jambo<small>Surf School</small></span></a>
           <div class="nav-links"><a href="#how-it-works">How it works</a><a href="#sessions">Sessions</a></div>
-          <button class="cta" id="openAdmin" style="padding: 10px 18px; font-size: 11px; font-family: var(--mono); text-transform: uppercase;">Admin login <span>↗</span></button>
         </nav>
 
         <div class="hero-grid">
           <div class="hero-copy" data-enter data-delay="1">
             <p class="eyebrow">SURF • SNAP • SMILE</p>
-            <h1>You bring the <em>stoke.</em><br />We’ll find the shots.</h1>
-            <p class="intro">Your surf photos are waiting. Upload a selfie and we’ll match you with every moment from the water.</p>
+            <h1>You bring the <em>stoke.</em><br />We'll find the shots.</h1>
+            <p class="intro">Your surf photos are waiting. Upload a selfie and we'll match you with every moment from the water.</p>
             <button class="cta ripple" id="startFinding">Find my photos <span>→</span></button>
             <p class="microcopy"><span class="spark">✦</span> Your selfie stays on your device. Pay only to unlock your matches.</p>
           </div>
           <div class="hero-image tilt-card" data-enter data-delay="2" data-tilt>
             <picture><source srcset="assets/mambo-jambo-surf-session-portrait.jpg" media="(max-width: 720px)" /><img src="assets/mambo-jambo-surf-session.jpg" alt="Mambo Jambo surf school session in Mulki" /></picture>
-            <div class="photo-tag"><span class="tag-dot"></span> MULKI, KARNATAKA <strong>Today’s lesson</strong></div>
+            <div class="photo-tag"><span class="tag-dot"></span> MULKI, KARNATAKA <strong>Today's lesson</strong></div>
             <div class="scribble">that one was<br /><b>yours!</b> <span>↗</span></div>
           </div>
         </div>
@@ -78,43 +77,19 @@
       </section>
 
       <section class="sessions" id="sessions">
-        <div data-reveal><p class="eyebrow">RECENT SESSIONS</p><h2>The ocean’s been<br /><em>showing off.</em></h2><a href="#finder">Find photos from a session <span>→</span></a></div>
+        <div data-reveal><p class="eyebrow">RECENT SESSIONS</p><h2>The ocean's been<br /><em>showing off.</em></h2><a href="#finder">Find photos from a session <span>→</span></a></div>
         <div class="session-stack tilt-card" data-reveal data-reveal-delay="1" data-tilt><img src="assets/mambo-jambo-surf-session.jpg" alt="Mambo Jambo group surf lesson" /><div><span>SEP 14</span><strong>Morning glass</strong><small>842 photos · Mulki</small></div></div>
       </section>
     </main>
+
     <footer><a class="brand" href="#home"><img src="assets/mambo-jambo-logo.png" alt="" /><span>Mambo Jambo<small>Surf School</small></span></a><p>Made for salty humans.</p><div><a href="#">Instagram</a><a href="#">Contact</a></div></footer>
+
+    <section class="results hidden" id="results">
       <div class="results-nav"><button id="backHome">← Back to home</button><a class="brand" href="#home"><img src="assets/mambo-jambo-logo.png" alt="" /><span>Mambo Jambo<small>Surf School</small></span></a><div class="results-actions"><button class="unlock-photos ripple" id="unlockPhotos">Unlock full set <span>→</span></button><button class="download-all ripple hidden" id="downloadAll">Download all <span>↓</span></button></div></div>
-      <div class="results-head"><p class="eyebrow" id="resultsMeta">SUNDAY, 14 SEPT · MULKI</p><h2 id="resultsTitle">We found <em>18</em> shots<br />with your name on ’em.</h2><p id="resultsCopy">Your matches are previewed with a watermark. Unlock the set for crisp, full-resolution downloads.</p></div>
+      <div class="results-head"><p class="eyebrow" id="resultsMeta">SUNDAY, 14 SEPT · MULKI</p><h2 id="resultsTitle">We found <em>18</em> shots<br />with your name on 'em.</h2><p id="resultsCopy">Your matches are previewed with a watermark. Unlock the set for crisp, full-resolution downloads.</p></div>
       <div class="gallery" id="gallery"></div>
     </section>
 
-    <aside class="admin-panel hidden" id="adminPanel">
-      <div class="admin-header"><div><p class="eyebrow">BACKSTAGE</p><h2>Photo drop</h2></div><div class="admin-header-actions"><button id="toggleAdminView" class="hidden">View Dashboard</button><button id="closeAdmin" aria-label="Close admin panel">×</button></div></div>
-      <form id="adminLoginForm" class="admin-login"><p>Sign in to prepare a private surf session.</p><label>Admin password<input id="adminPassword" type="password" autocomplete="current-password" required /></label><button class="publish ripple" type="submit">Enter studio <span>→</span></button><small id="adminLoginMessage"></small></form>
-      <form id="adminWorkspace" class="admin-workspace hidden">
-        <div class="admin-meta"><label>Session name<input id="adminTitle" type="text" value="Morning surf" maxlength="80" required /></label><label>Session date<input id="adminDate" type="date" value="2026-09-14" required /></label><label>Beach / break<input id="adminLocation" type="text" value="Mulki Beach" maxlength="80" required /></label><label>Photo-pack price (₹)<input id="adminPrice" type="number" value="299" min="1" step="1" required /></label></div>
-        <div class="admin-upload" id="adminDropZone"><div>↑</div><h3>Drop today’s session here</h3><p>Photos are uploaded instantly and indexed in the background. Guests only receive watermarked previews before payment.</p><label class="upload-button ripple" for="adminPhotoInput">Choose photos <span>↑</span></label><input id="adminPhotoInput" type="file" accept="image/*" multiple hidden /></div>
-        <div class="upload-status hidden" id="adminUploadStatus" aria-live="polite"></div>
-        <div class="surf-progress-container" id="adminUploadProgress">
-          <div class="surf-track">
-            <div class="surf-wave" id="adminWave"></div>
-            <div class="surfboard" id="adminSurfboard">🏄</div>
-          </div>
-          <div class="progress-stats">
-            <span id="adminSpeed">0 KB/s</span>
-            <span id="adminEta">ETA: --</span>
-          </div>
-        </div>
-        <button class="publish ripple" id="publishSession" type="submit">Publish photo pack <span>→</span></button>
-      </form>
-      <div id="adminDashboard" class="admin-dashboard hidden">
-        <h3>Session Dashboard</h3>
-        <p>Refresh to see background indexing progress.</p>
-        <button id="refreshDashboard" class="refresh-btn ripple">Refresh</button>
-        <div class="dashboard-list" id="dashboardList">Loading...</div>
-      </div>
-    </aside>
-    <div class="overlay hidden" id="overlay"></div>
     <script src="config.js"></script>
     <script src="app.js"></script>
   </body>
