@@ -147,14 +147,28 @@ $('#findMatches').addEventListener('click', async () => {
 function showResults(match) {
   $('#results').classList.remove('hidden'); matchingStage.classList.add('hidden');
   const unlockButton = $('#unlockPhotos'); const downloadButton = $('#downloadAll');
+  const banner = $('#indexingBanner');
   if (match) {
     activeSearch = match; unlockedPhotos = [];
     $('#resultsMeta').textContent = `${match.session.date} · ${match.session.location}`.toUpperCase();
-    $('#resultsTitle').innerHTML = match.count ? `We found <em>${match.count}</em> shots<br />with your name on ’em.` : 'No exact matches<br />just <em>yet.</em>';
-    $('#resultsCopy').textContent = match.count ? `Here are your watermarked previews. Unlock the full set for ${money(match.pricePaise, match.currency)}.` : (match.indexingNote || 'Try a clearer selfie, or ask our crew to take another look.');
+    if (match.count > 0) {
+      $('#resultsTitle').innerHTML = match.indexingNote ? `We found <em>${match.count}</em> shot${match.count > 1 ? 's' : ''}<br />so far...` : `We found <em>${match.count}</em> shot${match.count > 1 ? 's' : ''}<br />with your name on ’em.`;
+      $('#resultsCopy').textContent = `Here are your watermarked previews. Unlock the full set for ${money(match.pricePaise, match.currency)}.`;
+      if (match.indexingNote) {
+        banner.innerHTML = `<span class="indexing-banner-icon">🌊</span><div>${match.indexingNote}</div>`;
+        banner.classList.remove('hidden');
+      } else {
+        banner.classList.add('hidden');
+      }
+    } else {
+      $('#resultsTitle').innerHTML = 'Housekeeping in progress...';
+      $('#resultsCopy').textContent = match.indexingNote || 'Try a clearer selfie, or ask our crew to take another look.';
+      banner.classList.add('hidden');
+    }
     unlockButton.textContent = `Unlock full set · ${money(match.pricePaise, match.currency)}`; unlockButton.classList.toggle('hidden', !match.count); downloadButton.classList.add('hidden');
     $('#gallery').innerHTML = match.previews.map((photo, index) => `<figure class="preview" style="animation-delay:${.18 + index * .065}s"><img src="${apiUrl(photo.url)}" alt="Your watermarked surf-session preview"><div class="payment-lock">MATCH ${photo.score}% · UNLOCK TO DOWNLOAD</div></figure>`).join('');
   } else {
+    banner.classList.add('hidden');
     $('#resultsMeta').textContent = 'SUNDAY, 14 SEPT · MULKI';
     $('#resultsTitle').innerHTML = 'We found <em>18</em> shots<br />with your name on ’em.';
     $('#resultsCopy').textContent = 'This demo has no payment account attached yet. The live version shows watermarked previews until payment succeeds.';

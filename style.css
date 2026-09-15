@@ -170,7 +170,10 @@ footer div { display: flex; gap: 20px; }
 
 .results-head { margin: 65px 0 42px; animation: rise .65s .12s both cubic-bezier(.16,1,.3,1); }
 .results-head h2 { font-size: 58px; }
-.results-head > p:last-child { font-size: 14px; }
+.results-head > p { font-size: 14px; }
+.indexing-banner { background: #fdf8c2; border: 1.5px solid #e8da5a; color: var(--ink); padding: 16px 22px; border-radius: 12px; margin-top: 24px; font: 13px/1.55 var(--mono); display: flex; align-items: center; gap: 14px; box-shadow: 0 4px 14px rgba(48,40,24,.06); }
+.indexing-banner.hidden { display: none !important; }
+.indexing-banner-icon { font-size: 24px; flex-shrink: 0; }
 
 .gallery { columns: 3 250px; column-gap: 15px; }
 .gallery figure { margin: 0 0 15px; break-inside: avoid; position: relative; overflow: hidden; border-radius: 8px; animation: rise .55s both cubic-bezier(.16,1,.3,1); }
