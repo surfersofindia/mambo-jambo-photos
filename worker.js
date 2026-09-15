@@ -282,10 +282,12 @@ export default {
       if (request.method === 'POST' && reindex) {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
         const unindexed = await env.DB.prepare("SELECT id, object_key FROM photos WHERE indexing_status != 'completed'").all();
+        const results = [];
         for (const p of unindexed.results) {
           await processFaces(env, p.id, p.object_key);
+          results.push(p.id);
         }
-        return response({ reindexed: unindexed.results.length }, request, env);
+        return response({ reindexed: results.length, ids: results }, request, env);
       }
 
       const upload = url.pathname.match(/^\/api\/admin\/sessions\/([\w-]+)\/photos$/);
