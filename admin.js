@@ -582,28 +582,48 @@ async function loadVerifyQueue() {
   const grid = document.getElementById('verifyGrid');
   grid.innerHTML = '<p class="loading-msg">Loading match verification queue...</p>';
   try {
-    const { queue } = await apiRequest('/api/admin/verify-queue');
+    const { queue, stats } = await apiRequest('/api/admin/verify-queue');
+
+    if (stats) {
+      const pendingEl = document.getElementById('verifyPending');
+      const confirmedEl = document.getElementById('verifyConfirmed');
+      const rejectedEl = document.getElementById('verifyRejected');
+      if (pendingEl) pendingEl.textContent = stats.pending || 0;
+      if (confirmedEl) confirmedEl.textContent = stats.confirmed || 0;
+      if (rejectedEl) rejectedEl.textContent = stats.rejected || 0;
+    }
+
     if (!queue || !queue.length) {
-      grid.innerHTML = '<p class="empty-msg">All face matches verified! Crew match queue is clean. 🤙</p>';
+      grid.innerHTML = '<p class="empty-msg">All borderline face matches verified! Crew match queue is clean. 🤙</p>';
       return;
     }
+
     grid.innerHTML = queue.map((item) => `
       <div class="verify-card" id="verify-card-${item.id}">
-        <div style="font:11px var(--mono);color:var(--muted);text-align:center;">Session: ${escHtml(item.sessionTitle)}</div>
-        <div class="verify-faces">
-          <div class="verify-face-wrapper" title="Hover to view full photo">
-            <img src="${item.photo1Url}" class="verify-face-img" alt="Face 1" />
-            <span class="verify-zoom-tip">🔍 Face Crop</span>
+        <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);padding-bottom:10px;">
+          <div style="font:11px var(--mono);color:var(--text);font-weight:600;">Session: ${escHtml(item.sessionTitle)}</div>
+          <span style="font:10px var(--mono);font-weight:700;padding:3px 9px;border-radius:20px;background:rgba(248,232,56,0.15);color:var(--marker);border:1px solid rgba(248,232,56,0.3);">Similarity: ${item.similarityPct}%</span>
+        </div>
+        <div class="verify-faces" style="margin-top:10px;">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+            <div class="verify-face-wrapper" title="Hover to view full photo">
+              <img src="${item.photo1.url}" class="verify-face-img" alt="${escHtml(item.photo1.filename)}" />
+              <span class="verify-zoom-tip">🔍 Face Crop</span>
+            </div>
+            <span style="font:10px var(--mono);color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(item.photo1.filename)}</span>
           </div>
           <span class="verify-vs">VS</span>
-          <div class="verify-face-wrapper" title="Hover to view full photo">
-            <img src="${item.photo2Url}" class="verify-face-img" alt="Face 2" />
-            <span class="verify-zoom-tip">🔍 Face Crop</span>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+            <div class="verify-face-wrapper" title="Hover to view full photo">
+              <img src="${item.photo2.url}" class="verify-face-img" alt="${escHtml(item.photo2.filename)}" />
+              <span class="verify-zoom-tip">🔍 Face Crop</span>
+            </div>
+            <span style="font:10px var(--mono);color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(item.photo2.filename)}</span>
           </div>
         </div>
-        <div class="verify-actions">
-          <button class="confirm-btn" data-pair-id="${item.id}" data-action="confirm">✓ Confirm Match</button>
-          <button class="reject-btn" data-pair-id="${item.id}" data-action="reject">✗ Not Same Person</button>
+        <div class="verify-actions" style="margin-top:12px;">
+          <button class="confirm-btn" data-pair-id="${item.id}" data-action="confirm">✓ Confirm Same Surfer</button>
+          <button class="reject-btn" data-pair-id="${item.id}" data-action="reject">✗ Different Surfer</button>
         </div>
       </div>
     `).join('');
@@ -629,7 +649,6 @@ document.getElementById('verifyGrid').addEventListener('click', async (e) => {
     });
 
     if (card) {
-      // Smooth fade out & slide up animation before removal
       card.style.transition = 'all 0.35s cubic-bezier(0.4, 0, 0.2, 1)';
       card.style.opacity = '0';
       card.style.transform = 'translateY(-12px) scale(0.95)';
@@ -638,16 +657,48 @@ document.getElementById('verifyGrid').addEventListener('click', async (e) => {
         card.remove();
         const remaining = document.querySelectorAll('.verify-card');
         if (!remaining.length) {
-          document.getElementById('verifyGrid').innerHTML = '<p class="empty-msg">All face matches verified! Crew match queue is clean. 🤙</p>';
+          document.getElementById('verifyGrid').innerHTML = '<p class="empty-msg">All borderline face matches verified! Crew match queue is clean. 🤙</p>';
         }
       }, 350);
+    }
+
+    // Update pending counter
+    const pendingEl = document.getElementById('verifyPending');
+    if (pendingEl) {
+      const current = Math.max(0, Number(pendingEl.textContent || 0) - 1);
+      pendingEl.textContent = current;
+    }
+    if (confirmed) {
+      const confirmedEl = document.getElementById('verifyConfirmed');
+      if (confirmedEl) confirmedEl.textContent = Number(confirmedEl.textContent || 0) + 1;
+    } else {
+      const rejectedEl = document.getElementById('verifyRejected');
+      if (rejectedEl) rejectedEl.textContent = Number(rejectedEl.textContent || 0) + 1;
     }
   } catch (err) {
     alert(err.message);
     btn.disabled = false;
-    btn.textContent = confirmed ? '✓ Confirm Match' : '✗ Not Same Person';
+    btn.textContent = confirmed ? '✓ Confirm Same Surfer' : '✗ Different Surfer';
   }
 });
+
+const rescanVerifyBtn = document.getElementById('rescanVerifyBtn');
+if (rescanVerifyBtn) {
+  rescanVerifyBtn.addEventListener('click', async () => {
+    rescanVerifyBtn.disabled = true;
+    rescanVerifyBtn.textContent = 'Scanning...';
+    try {
+      const res = await apiRequest('/api/admin/verify-queue/scan', { method: 'POST' });
+      alert(`✓ Borderline scan complete! Found ${res.generated || 0} candidate pair(s) for verification.`);
+      loadVerifyQueue();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      rescanVerifyBtn.disabled = false;
+      rescanVerifyBtn.textContent = '🔍 Rescan Borderline Matches';
+    }
+  });
+}
 
 const refreshVerifyBtn = document.getElementById('refreshVerifyBtn');
 if (refreshVerifyBtn) {

@@ -874,10 +874,30 @@
         <div class="dashboard-header">
           <div>
             <h2 class="section-title">Crew Match Verification</h2>
-            <p class="section-sub">Help confirm borderline face matches to improve search accuracy for surfers.</p>
+            <p class="section-sub">Help confirm borderline face matches to train & refine search accuracy for surfers.</p>
           </div>
-          <button class="refresh-link" id="refreshVerifyBtn">↻ Refresh Queue</button>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <button class="btn-sm btn-primary-sm" id="rescanVerifyBtn">🔍 Rescan Borderline Matches</button>
+            <button class="refresh-link" id="refreshVerifyBtn">↻ Refresh Queue</button>
+          </div>
         </div>
+
+        <!-- Verification Stats Bar -->
+        <div class="metrics-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 24px;">
+          <div class="metric-card">
+            <label>Pending Reviews</label>
+            <div class="value" id="verifyPending">0</div>
+          </div>
+          <div class="metric-card">
+            <label>Confirmed Matches</label>
+            <div class="value" id="verifyConfirmed" style="color:#4caf50;">0</div>
+          </div>
+          <div class="metric-card">
+            <label>Dismissed / Rejected</label>
+            <div class="value" id="verifyRejected" style="color:var(--coral);">0</div>
+          </div>
+        </div>
+
         <div class="verify-grid" id="verifyGrid">
           <p class="loading-msg">Loading match verification queue...</p>
         </div>

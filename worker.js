@@ -126,6 +126,66 @@ async function processFaces(env, photoId, objectKey) {
   }
 }
 
+async function generateBorderlineMatches(env, targetSessionId = null) {
+  let query = `
+    SELECT f.id as face_id, f.photo_id, f.embedding_json, p.session_id, s.title as session_title
+    FROM faces f
+    JOIN photos p ON p.id = f.photo_id
+    JOIN sessions s ON s.id = p.session_id
+  `;
+  if (targetSessionId) {
+    query += ` WHERE p.session_id = '${targetSessionId}'`;
+  }
+  
+  const facesRes = await env.DB.prepare(query).all();
+  const faces = facesRes.results;
+  
+  const statements = [];
+  const addedPairs = new Set();
+  
+  for (let i = 0; i < faces.length; i++) {
+    const f1 = faces[i];
+    let emb1;
+    try { emb1 = JSON.parse(f1.embedding_json); } catch { continue; }
+    
+    for (let j = i + 1; j < faces.length; j++) {
+      const f2 = faces[j];
+      
+      // Never compare faces from the SAME photo
+      if (f1.photo_id === f2.photo_id) continue;
+      // Only compare within the same session
+      if (f1.session_id !== f2.session_id) continue;
+      
+      const pairKey = f1.face_id < f2.face_id ? `${f1.face_id}:${f2.face_id}` : `${f2.face_id}:${f1.face_id}`;
+      if (addedPairs.has(pairKey)) continue;
+      addedPairs.add(pairKey);
+      
+      let emb2;
+      try { emb2 = JSON.parse(f2.embedding_json); } catch { continue; }
+      
+      const score = similarity(emb1, emb2);
+      
+      // Borderline match zone: 0.50 <= score < 0.65
+      if (score >= 0.50 && score < 0.65) {
+        const verId = id();
+        statements.push(
+          env.DB.prepare(`
+            INSERT OR IGNORE INTO face_verifications (id, session_id, face1_id, face2_id, similarity, status)
+            VALUES (?, ?, ?, ?, ?, 'pending')
+          `).bind(verId, f1.session_id, f1.face_id, f2.face_id, score)
+        );
+      }
+    }
+  }
+  
+  if (statements.length > 0) {
+    for (let k = 0; k < statements.length; k += 50) {
+      await env.DB.batch(statements.slice(k, k + 50));
+    }
+  }
+  return statements.length;
+}
+
 export default {
   async fetch(request, env, ctx) {
     try {
@@ -397,35 +457,82 @@ export default {
         return response({ updated: true }, request, env);
       }
 
+      // POST /api/admin/verify-queue/scan - Generate candidate borderline matches
+      if (request.method === 'POST' && url.pathname === '/api/admin/verify-queue/scan') {
+        if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
+        const count = await generateBorderlineMatches(env);
+        return response({ generated: count }, request, env);
+      }
+
       // GET /api/admin/verify-queue - Fetch face pairs needing confirmation
       if (request.method === 'GET' && url.pathname === '/api/admin/verify-queue') {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
         const base = url.origin;
-        const faces = await env.DB.prepare(`
-          SELECT f1.id as face1_id, f1.photo_id as photo1_id, f2.id as face2_id, f2.photo_id as photo2_id, p1.session_id, s.title as session_title
-          FROM faces f1
-          JOIN photos p1 ON p1.id = f1.photo_id
-          JOIN sessions s ON s.id = p1.session_id
-          JOIN faces f2 ON f2.id > f1.id
-          JOIN photos p2 ON p2.id = f2.photo_id AND p2.session_id = p1.session_id
-          LIMIT 10
-        `).all();
+        
+        // Auto-scan borderline matches if queue is empty
+        const countCheck = await env.DB.prepare("SELECT COUNT(*) as cnt FROM face_verifications WHERE status = 'pending'").first();
+        if (!countCheck || countCheck.cnt === 0) {
+          await generateBorderlineMatches(env);
+        }
 
-        const queue = await Promise.all(faces.results.map(async (item) => ({
-          id: `${item.face1_id}-${item.face2_id}`,
+        const query = `
+          SELECT 
+            fv.id, fv.similarity, fv.status, s.title as session_title,
+            p1.id as photo1_id, p1.filename as photo1_filename,
+            p2.id as photo2_id, p2.filename as photo2_filename,
+            f1.id as face1_id, f2.id as face2_id
+          FROM face_verifications fv
+          JOIN sessions s ON s.id = fv.session_id
+          JOIN faces f1 ON f1.id = fv.face1_id
+          JOIN photos p1 ON p1.id = f1.photo_id
+          JOIN faces f2 ON f2.id = fv.face2_id
+          JOIN photos p2 ON p2.id = f2.photo_id
+          WHERE fv.status = 'pending'
+          ORDER BY fv.similarity DESC
+          LIMIT 20
+        `;
+        const res = await env.DB.prepare(query).all();
+
+        const queue = await Promise.all(res.results.map(async (item) => ({
+          id: item.id,
           sessionTitle: item.session_title,
-          photo1Url: `${base}/api/media/${item.photo1_id}?variant=preview&token=${encodeURIComponent(await mediaToken(item.photo1_id, 'preview', env))}`,
-          photo2Url: `${base}/api/media/${item.photo2_id}?variant=preview&token=${encodeURIComponent(await mediaToken(item.photo2_id, 'preview', env))}`,
+          similarityPct: Math.round(item.similarity * 100),
+          photo1: {
+            id: item.photo1_id,
+            filename: item.photo1_filename,
+            url: `${base}/api/media/${item.photo1_id}?variant=preview&token=${encodeURIComponent(await mediaToken(item.photo1_id, 'preview', env))}`,
+          },
+          photo2: {
+            id: item.photo2_id,
+            filename: item.photo2_filename,
+            url: `${base}/api/media/${item.photo2_id}?variant=preview&token=${encodeURIComponent(await mediaToken(item.photo2_id, 'preview', env))}`,
+          },
         })));
 
-        return response({ queue }, request, env);
+        const stats = await env.DB.prepare(`
+          SELECT 
+            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+            SUM(CASE WHEN status = 'confirmed' THEN 1 ELSE 0 END) as confirmed,
+            SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected
+          FROM face_verifications
+        `).first();
+
+        return response({ queue, stats: { pending: stats?.pending || 0, confirmed: stats?.confirmed || 0, rejected: stats?.rejected || 0 } }, request, env);
       }
 
       // POST /api/admin/confirm-match - Confirm or reject borderline face match
       if (request.method === 'POST' && url.pathname === '/api/admin/confirm-match') {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
         const { pairId, confirmed } = await request.json();
-        return response({ confirmed, pairId }, request, env);
+        const newStatus = confirmed ? 'confirmed' : 'rejected';
+        
+        await env.DB.prepare(`
+          UPDATE face_verifications 
+          SET status = ?, updated_at = CURRENT_TIMESTAMP 
+          WHERE id = ? OR (face1_id || '-' || face2_id) = ?
+        `).bind(newStatus, pairId, pairId).run();
+
+        return response({ success: true, status: newStatus }, request, env);
       }
 
       const reindex = url.pathname.match(/^\/api\/admin\/reindex$/);
