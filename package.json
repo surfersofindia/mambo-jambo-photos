@@ -7,7 +7,7 @@
     "db:apply": "wrangler d1 execute mambo-jambo-photos --remote --file=schema.sql",
     "dev": "node scripts/dev.mjs",
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check app.js && node --check admin.js && node --check worker.js",
+    "check": "node --check app.js && node --check admin.js && node --check worker.js && node --check effects.js",
     "build": "node scripts/build.mjs"
   },
   "devDependencies": {

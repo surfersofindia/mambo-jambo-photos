@@ -20,6 +20,7 @@ function stage(name) {
   $('#step2').classList.toggle('active', name === 'selfie');
   $('#step3').classList.toggle('active', name === 'matching');
   status();
+  document.dispatchEvent(new CustomEvent('mj:stage', { detail: name }));
 }
 function chooseSession(id) {
   if (searchController) searchController.abort();
@@ -47,6 +48,7 @@ async function loadSessions() {
       const location = document.createElement('p'); location.textContent = `${session.location} · Find your photos`;
       button.append(img, date, title, location); button.addEventListener('click', () => chooseSession(session.id)); $('#sessionCards').append(button);
     }
+    document.dispatchEvent(new Event('mj:sessions'));
     status();
   } catch (error) {
     $('#sessionSelect').replaceChildren(new Option('Sessions currently unavailable', '')); $('#retrySessions').hidden = false;
@@ -116,7 +118,7 @@ function renderGallery() {
   });
 }
 $('#favouritesFilter').addEventListener('click', () => { favouritesOnly = !favouritesOnly; $('#favouritesFilter').setAttribute('aria-pressed', String(favouritesOnly)); renderGallery(); });
-function openPhoto(index) { photoIndex = (index + photos.length) % photos.length; $('#lightboxImage').src = photos[photoIndex].url; $('#lightboxCount').textContent = `${photoIndex + 1} of ${photos.length}`; if (!$('#lightbox').open) $('#lightbox').showModal(); }
+function openPhoto(index) { photoIndex = (index + photos.length) % photos.length; $('#lightboxImage').src = photos[photoIndex].url; $('#lightboxCount').textContent = `${photoIndex + 1} of ${photos.length}`; if (!$('#lightbox').open) $('#lightbox').showModal(); document.dispatchEvent(new Event('mj:photo')); }
 $('#closeLightbox').addEventListener('click', () => $('#lightbox').close());
 $('#previousPhoto').addEventListener('click', () => openPhoto(photoIndex - 1)); $('#nextPhoto').addEventListener('click', () => openPhoto(photoIndex + 1));
 $('#lightbox').addEventListener('keydown', event => { if (event.key === 'ArrowLeft') { event.preventDefault(); openPhoto(photoIndex - 1); } if (event.key === 'ArrowRight') { event.preventDefault(); openPhoto(photoIndex + 1); } });
