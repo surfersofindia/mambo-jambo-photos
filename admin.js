@@ -121,7 +121,29 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
     btn.classList.add('active');
     document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
     if (btn.dataset.tab === 'dashboard') loadDashboard();
+    if (btn.dataset.tab === 'verify') loadVerifyQueue();
   });
+});
+
+// ── Modals ────────────────────────────────────────────────────────────────────
+
+const photoGalleryModal = document.getElementById('photoGalleryModal');
+const closeGalleryModal = document.getElementById('closeGalleryModal');
+const editSessionModal  = document.getElementById('editSessionModal');
+const closeEditModal    = document.getElementById('closeEditModal');
+
+if (closeGalleryModal) {
+  closeGalleryModal.addEventListener('click', () => photoGalleryModal.classList.add('hidden'));
+}
+if (closeEditModal) {
+  closeEditModal.addEventListener('click', () => editSessionModal.classList.add('hidden'));
+}
+[photoGalleryModal, editSessionModal].forEach((modal) => {
+  if (modal) {
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.classList.add('hidden');
+    });
+  }
 });
 
 // ── Upload: preview generation ────────────────────────────────────────────────
@@ -328,14 +350,20 @@ async function loadDashboard(silent = false) {
     const { sessions } = await apiRequest('/api/admin/dashboard');
     if (!sessions.length) {
       grid.innerHTML = '<p class="empty-msg">No sessions yet. Go to the Upload tab to create one.</p>';
+      updateMetrics([]);
       if (dashInterval) { clearInterval(dashInterval); dashInterval = null; }
       return;
     }
+
+    updateMetrics(sessions);
+
     let hasPending = false;
     grid.innerHTML = sessions.map((s) => {
       const isDone = s.total_photos > 0 && s.indexed_photos === s.total_photos;
       if (!isDone && s.status !== 'draft') hasPending = true;
       const indexedStr = isDone ? '✓ Done' : `${s.indexed_photos || 0} / ${s.total_photos || '?'}`;
+      const priceRs = Math.round((s.price_paise || 29900) / 100);
+
       return `
         <div class="d-card">
           <div class="d-card-head">
@@ -347,6 +375,11 @@ async function loadDashboard(silent = false) {
             <div><span>Photos</span><strong>${indexedStr}</strong></div>
             <div><span>Downloads</span><strong>${s.downloads}</strong></div>
             <div class="spacer"></div>
+          </div>
+          <div class="action-group">
+            <button class="btn-sm btn-primary-sm view-photos-btn" data-session-id="${escHtml(s.id)}" data-session-title="${escHtml(s.title)}">📷 View Photos (${s.total_photos || 0})</button>
+            <button class="btn-sm edit-session-btn" data-session-id="${escHtml(s.id)}" data-title="${escHtml(s.title)}" data-date="${escHtml(s.date || '')}" data-location="${escHtml(s.location || '')}" data-price="${priceRs}" data-status="${s.status}">✏️ Edit</button>
+            <button class="btn-sm reindex-btn" data-session-id="${escHtml(s.id)}">🔄 Re-index</button>
             <button class="delete-btn" data-session-id="${escHtml(s.id)}">Delete</button>
           </div>
         </div>
@@ -363,18 +396,67 @@ async function loadDashboard(silent = false) {
   }
 }
 
-// Event delegation for Delete buttons — avoids inline onclick
-document.getElementById('dashboardGrid').addEventListener('click', async (e) => {
-  const btn = e.target.closest('.delete-btn');
-  if (!btn) return;
-  const id = btn.dataset.sessionId;
-  if (!id) return;
-  if (!confirm('Delete this session and permanently remove ALL its photos from storage? This cannot be undone.')) return;
-  btn.disabled = true;
-  btn.textContent = 'Deleting…';
+function updateMetrics(sessions) {
+  let totalDownloads = 0;
+  let totalPhotos = 0;
+  let totalRevenuePaise = 0;
+  let activeSessions = 0;
+
+  sessions.forEach((s) => {
+    totalDownloads += Number(s.downloads || 0);
+    totalPhotos += Number(s.total_photos || 0);
+    if (s.status === 'published') activeSessions++;
+    totalRevenuePaise += (Number(s.downloads || 0) * Number(s.price_paise || 29900));
+  });
+
+  const revRs = Math.round(totalRevenuePaise / 100);
+  document.getElementById('statRevenue').textContent = `₹${revRs.toLocaleString('en-IN')}`;
+  document.getElementById('statDownloads').textContent = totalDownloads;
+  document.getElementById('statPhotos').textContent = totalPhotos;
+  document.getElementById('statSessions').textContent = activeSessions;
+}
+
+// ── View Session Photos Modal ────────────────────────────────────────────────
+
+async function viewSessionPhotos(sessionId, sessionTitle) {
+  const modal = document.getElementById('photoGalleryModal');
+  const titleEl = document.getElementById('galleryModalTitle');
+  const grid = document.getElementById('galleryGrid');
+  
+  titleEl.textContent = `Photos — ${sessionTitle}`;
+  grid.innerHTML = '<p class="loading-msg">Loading session photos...</p>';
+  modal.classList.remove('hidden');
+
   try {
-    await apiRequest(`/api/admin/sessions/${id}`, { method: 'DELETE' });
-    loadDashboard();
+    const { photos } = await apiRequest(`/api/admin/sessions/${sessionId}/photos`);
+    if (!photos.length) {
+      grid.innerHTML = '<p class="empty-msg">No photos uploaded to this session yet.</p>';
+      return;
+    }
+    grid.innerHTML = photos.map((p) => `
+      <div class="photo-card" id="photo-card-${p.id}">
+        <img src="${p.previewUrl}" alt="${escHtml(p.filename)}" loading="lazy" />
+        <span class="photo-badge">${p.face_count} face${p.face_count === 1 ? '' : 's'}</span>
+        <button class="photo-delete-btn" data-photo-id="${p.id}">Delete</button>
+      </div>
+    `).join('');
+  } catch (err) {
+    grid.innerHTML = `<p class="loading-msg error-msg">${escHtml(err.message)}</p>`;
+  }
+}
+
+document.getElementById('galleryGrid').addEventListener('click', async (e) => {
+  const btn = e.target.closest('.photo-delete-btn');
+  if (!btn) return;
+  const photoId = btn.dataset.photoId;
+  if (!confirm('Delete this photo permanently?')) return;
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    await apiRequest(`/api/admin/photos/${photoId}`, { method: 'DELETE' });
+    const card = document.getElementById(`photo-card-${photoId}`);
+    if (card) card.remove();
+    loadDashboard(true);
   } catch (err) {
     alert(err.message);
     btn.disabled = false;
@@ -382,10 +464,152 @@ document.getElementById('dashboardGrid').addEventListener('click', async (e) => 
   }
 });
 
+// ── Edit Session Details ─────────────────────────────────────────────────────
+
+document.getElementById('editSessionForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const sessionId = document.getElementById('editSessionId').value;
+  const title = document.getElementById('editTitle').value;
+  const date = document.getElementById('editDate').value;
+  const location = document.getElementById('editLocation').value;
+  const pricePaise = Math.round(Number(document.getElementById('editPrice').value) * 100);
+  const status = document.getElementById('editStatus').value;
+
+  try {
+    await apiRequest(`/api/admin/sessions/${sessionId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ title, date, location, pricePaise, status }),
+    });
+    document.getElementById('editSessionModal').classList.add('hidden');
+    loadDashboard();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+// ── Session Card Action Event Delegation ──────────────────────────────────────
+
+document.getElementById('dashboardGrid').addEventListener('click', async (e) => {
+  // View Photos
+  const viewBtn = e.target.closest('.view-photos-btn');
+  if (viewBtn) {
+    return viewSessionPhotos(viewBtn.dataset.sessionId, viewBtn.dataset.sessionTitle);
+  }
+
+  // Edit Session
+  const editBtn = e.target.closest('.edit-session-btn');
+  if (editBtn) {
+    document.getElementById('editSessionId').value = editBtn.dataset.sessionId;
+    document.getElementById('editTitle').value = editBtn.dataset.title;
+    document.getElementById('editDate').value = editBtn.dataset.date;
+    document.getElementById('editLocation').value = editBtn.dataset.location;
+    document.getElementById('editPrice').value = editBtn.dataset.price;
+    document.getElementById('editStatus').value = editBtn.dataset.status;
+    document.getElementById('editSessionModal').classList.remove('hidden');
+    return;
+  }
+
+  // Reindex Session
+  const reindexBtn = e.target.closest('.reindex-btn');
+  if (reindexBtn) {
+    reindexBtn.disabled = true;
+    reindexBtn.textContent = 'Indexing...';
+    try {
+      const res = await apiRequest(`/api/admin/sessions/${reindexBtn.dataset.sessionId}/reindex`, { method: 'POST' });
+      alert(`Queued ${res.queued || 0} photos for background face scanning!`);
+      loadDashboard();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      reindexBtn.disabled = false;
+      reindexBtn.textContent = '🔄 Re-index';
+    }
+    return;
+  }
+
+  // Delete Session
+  const deleteBtn = e.target.closest('.delete-btn');
+  if (deleteBtn) {
+    const id = deleteBtn.dataset.sessionId;
+    if (!confirm('Delete this session and permanently remove ALL its photos from storage? This cannot be undone.')) return;
+    deleteBtn.disabled = true;
+    deleteBtn.textContent = 'Deleting…';
+    try {
+      await apiRequest(`/api/admin/sessions/${id}`, { method: 'DELETE' });
+      loadDashboard();
+    } catch (err) {
+      alert(err.message);
+      deleteBtn.disabled = false;
+      deleteBtn.textContent = 'Delete';
+    }
+    return;
+  }
+});
+
 document.getElementById('refreshBtn').addEventListener('click', () => loadDashboard());
+
+// ── Crew Match Verification Queue ─────────────────────────────────────────────
+
+async function loadVerifyQueue() {
+  const grid = document.getElementById('verifyGrid');
+  grid.innerHTML = '<p class="loading-msg">Loading match verification queue...</p>';
+  try {
+    const { queue } = await apiRequest('/api/admin/verify-queue');
+    if (!queue || !queue.length) {
+      grid.innerHTML = '<p class="empty-msg">All face matches verified! Crew match queue is clean. 🤙</p>';
+      return;
+    }
+    grid.innerHTML = queue.map((item) => `
+      <div class="verify-card" id="verify-card-${item.id}">
+        <div style="font:11px var(--mono);color:var(--muted);text-align:center;">Session: ${escHtml(item.sessionTitle)}</div>
+        <div class="verify-faces">
+          <img src="${item.photo1Url}" class="verify-face-img" alt="Face 1" />
+          <span class="verify-vs">VS</span>
+          <img src="${item.photo2Url}" class="verify-face-img" alt="Face 2" />
+        </div>
+        <div class="verify-actions">
+          <button class="confirm-btn" data-pair-id="${item.id}" data-action="confirm">✓ Confirm Match</button>
+          <button class="reject-btn" data-pair-id="${item.id}" data-action="reject">✗ Not Same Person</button>
+        </div>
+      </div>
+    `).join('');
+  } catch (err) {
+    grid.innerHTML = `<p class="loading-msg error-msg">${escHtml(err.message)}</p>`;
+  }
+}
+
+document.getElementById('verifyGrid').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-pair-id]');
+  if (!btn) return;
+  const pairId = btn.dataset.pairId;
+  const confirmed = btn.dataset.action === 'confirm';
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+  try {
+    await apiRequest('/api/admin/confirm-match', {
+      method: 'POST',
+      body: JSON.stringify({ pairId, confirmed }),
+    });
+    const card = document.getElementById(`verify-card-${pairId}`);
+    if (card) card.remove();
+    const remaining = document.querySelectorAll('.verify-card');
+    if (!remaining.length) {
+      document.getElementById('verifyGrid').innerHTML = '<p class="empty-msg">All face matches verified! Crew match queue is clean. 🤙</p>';
+    }
+  } catch (err) {
+    alert(err.message);
+    btn.disabled = false;
+  }
+});
+
+const refreshVerifyBtn = document.getElementById('refreshVerifyBtn');
+if (refreshVerifyBtn) {
+  refreshVerifyBtn.addEventListener('click', () => loadVerifyQueue());
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function escHtml(str) {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
+
