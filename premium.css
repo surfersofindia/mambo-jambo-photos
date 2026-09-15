@@ -142,3 +142,28 @@ footer p{font-family:var(--sans);font-size:17px}.motion-toggle span{border-color
 @media(min-width:1440px){.hero{min-height:900px}.how,.privacy{padding-inline:max(5%,calc((100vw - 1296px)/2))}}
 @media(max-width:650px){.header{margin-bottom:-85px}.header nav .nav-cta{font-size:8px;padding:12px}.hero{min-height:88svh;padding:130px 6% 22px}.hero-wordmark{width:94vw;max-width:none}.hero-hand{font-size:23px}.hero h1{font-size:29px;letter-spacing:-1px;margin-top:35px}.hero .intro{font-size:12px;max-width:320px}.hero .intro br{display:none}.hero-bottom{grid-template-columns:1fr auto;font-size:6px;line-height:1.8}.hero-bottom span:last-child{display:none}.hero-bottom a{width:32px;height:32px}.hero-note{font-size:7px}.hero-photo{transform:none!important}footer>div{border-color:#30281825}}
 @media(prefers-reduced-motion:reduce){.hero-photo{transform:none!important}.hero-photo img{transform:none}}
+/* The session picker uses native radios for touch and keyboard selection. */
+.session-picker{border:0;padding:0;margin:25px 0 0;min-width:0}
+.session-picker legend{font:9px var(--mono);letter-spacing:1px;text-transform:uppercase;color:var(--muted);padding:0;margin-bottom:12px}
+.session-list{display:grid;gap:10px;max-height:350px;overflow-y:auto;overscroll-behavior:contain;padding:4px;margin:-4px;scrollbar-width:thin;scrollbar-color:#a0b8b0 transparent}
+.finder-card .session-list .session-choice{position:relative;display:grid;grid-template-columns:54px minmax(0,1fr) 22px;align-items:center;gap:14px;margin:0;padding:16px;border:1px solid #e7e2d6;border-radius:10px;background:#fff;cursor:pointer;font-weight:400;transition:border-color .25s,background .25s,box-shadow .25s,transform .3s var(--ease-out)}
+.session-choice input{position:absolute;inset:0;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}
+.session-choice:hover{border-color:#a0b8b0!important;background:#f8f9f5!important}
+.session-choice:has(input:checked){border-color:var(--ocean)!important;background:#edf4f7!important;box-shadow:0 0 0 1px var(--ocean),0 6px 20px #3070a00c}
+.session-choice:has(input:focus-visible){outline:2px solid var(--ocean);outline-offset:3px}
+.session-date{display:grid;align-content:center;justify-items:center;gap:3px;min-height:59px;border:1px solid #e7e2d6;border-radius:6px;background:#f3f0e9;color:var(--ink);transition:background .25s,border-color .25s}
+.session-date small{font:9px var(--mono);text-transform:uppercase;letter-spacing:1px}
+.session-date strong{font:600 25px/1 var(--sans);letter-spacing:-1px}
+.session-choice:has(input:checked) .session-date{background:#fff;border-color:#3070a030}
+.session-choice-copy{display:grid;gap:5px;min-width:0}
+.session-choice-copy>strong{font:600 14px/1.35 var(--sans);overflow-wrap:anywhere}
+.session-choice-copy>span{font:11px/1.6 var(--sans);color:var(--muted);overflow-wrap:anywhere}
+.session-recent{font:8px var(--mono);letter-spacing:.4px;color:#855044}
+.session-check{display:grid;place-items:center;width:20px;height:20px;border:1px solid #c8c9be;border-radius:50%;font-size:11px;color:transparent;transition:background .25s,border-color .25s,scale .3s var(--ease-out)}
+.session-choice:has(input:checked) .session-check{background:var(--ocean);border-color:var(--ocean);color:white;scale:1.08}
+.finder-card .session-helper{font-size:10px!important;text-align:center;margin:12px 0 0!important;color:var(--muted)}
+#sessionFilterWrap{margin-top:22px}#sessionFilterWrap label{margin:0 0 8px!important}#sessionFilter{width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:7px;background:#f8f8f8;color:var(--ink);font:12px var(--sans)}
+.finder-card .selected-session{margin:8px 0 20px;padding:10px 12px;border-left:2px solid var(--ocean);background:#edf4f7;font-size:11px;color:#1d4f76;border-radius:0 5px 5px 0}
+.session-loading{padding:20px 12px;background:#f3f0e9;border-radius:8px}
+.session-list[aria-busy=true]{opacity:.6}
+@media(max-width:650px){.finder-card .session-list .session-choice{padding:13px;gap:11px;grid-template-columns:46px minmax(0,1fr) 20px}.session-date{min-height:54px}.session-choice-copy>strong{font-size:13px}.session-choice-copy>span{font-size:10px}.session-list{max-height:320px}}

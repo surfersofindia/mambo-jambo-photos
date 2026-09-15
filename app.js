@@ -1,6 +1,7 @@
 'use strict';
 const $ = (selector) => document.querySelector(selector);
 const apiBase = (window.MJ_CONFIG?.apiUrl || '').replace(/\/$/, '');
+let selectedSessionId = '';
 let sessions = [], selectedFile = null, previewUrl = null, photos = [], favourites = new Set(), favouritesOnly = false, photoIndex = 0, searchController = null;
 const status = (message = '', error = false) => { $('#finderStatus').textContent = message; $('#finderStatus').classList.toggle('error', error); };
 async function requestApi(path, options = {}) {
@@ -24,22 +25,56 @@ function stage(name) {
 }
 function chooseSession(id) {
   if (searchController) searchController.abort();
-  $('#sessionSelect').value = id;
+  const session = sessions.find(item => item.id === id);
+  if (!session) return;
+  selectSession(id);
   $('#main').hidden = false; $('#results').hidden = true;
   stage('selfie'); $('#finder').scrollIntoView(); $('#changeSession').focus({ preventScroll: true });
 }
+function selectSession(id) {
+  const session = sessions.find(item => item.id === id);
+  if (!session) return;
+  selectedSessionId = id;
+  document.querySelectorAll('input[name="surfSession"]').forEach(input => { input.checked = input.value === id; });
+  $('#nextStep').disabled = false;
+  $('#nextStep').replaceChildren(document.createTextNode('Continue with this session '));
+  const arrow = document.createElement('span'); arrow.textContent = '→'; $('#nextStep').append(arrow);
+  $('#selectedSessionSummary').textContent = `${session.title} · ${dateLabel(session.session_date)} · ${session.location}`;
+}
+function renderSessionChoices() {
+  const list = $('#sessionChoices'); list.replaceChildren();
+  sessions.forEach((session, index) => {
+    const label = document.createElement('label'); label.className = 'session-choice';
+    label.dataset.search = `${session.title} ${session.location} ${session.session_date} ${dateLabel(session.session_date)}`.toLowerCase();
+    const input = document.createElement('input'); input.type = 'radio'; input.name = 'surfSession'; input.value = session.id; input.checked = session.id === selectedSessionId;
+    input.addEventListener('change', () => selectSession(session.id));
+    const date = new Date(`${session.session_date}T12:00:00`);
+    const badge = document.createElement('span'); badge.className = 'session-date'; badge.setAttribute('aria-hidden', 'true');
+    const month = document.createElement('small'); month.textContent = Number.isNaN(date.getTime()) ? 'SURF' : date.toLocaleDateString('en-IN', { month: 'short' });
+    const day = document.createElement('strong'); day.textContent = Number.isNaN(date.getTime()) ? '〰' : String(date.getDate()).padStart(2, '0'); badge.append(month, day);
+    const copy = document.createElement('span'); copy.className = 'session-choice-copy';
+    const title = document.createElement('strong'); title.textContent = session.title;
+    const detail = document.createElement('span'); detail.textContent = `${dateLabel(session.session_date)} · ${session.location}`;
+    copy.append(title, detail);
+    if (index === 0) { const recent = document.createElement('small'); recent.className = 'session-recent'; recent.textContent = 'Latest session'; copy.append(recent); }
+    const check = document.createElement('span'); check.className = 'session-check'; check.setAttribute('aria-hidden', 'true'); check.textContent = '✓';
+    label.append(input, badge, copy, check); list.append(label);
+  });
+  $('#sessionFilterWrap').hidden = sessions.length <= 4;
+  $('#sessionFilter').value = ''; $('#sessionNoResults').hidden = true;
+}
 async function loadSessions() {
-  $('#retrySessions').hidden = true; $('#sessionSelect').disabled = true; $('#nextStep').disabled = true;
+  $('#retrySessions').hidden = true; $('#sessionPicker').disabled = true; $('#nextStep').disabled = true; $('#sessionChoices').setAttribute('aria-busy', 'true');
   status('Loading available sessions…');
   try {
     const data = await requestApi('/api/sessions');
     if (!Array.isArray(data.sessions)) throw new Error('Sessions could not be loaded. Please try again.');
     sessions = data.sessions;
-    $('#sessionSelect').replaceChildren(new Option(sessions.length ? 'Choose your surf session' : 'No sessions published yet', ''));
-    for (const session of sessions) $('#sessionSelect').add(new Option(`${dateLabel(session.session_date)} · ${session.title} · ${session.location}`, session.id));
-    $('#sessionSelect').disabled = !sessions.length;
+    selectedSessionId = '';
+    renderSessionChoices();
+    $('#sessionPicker').disabled = !sessions.length;
     $('#sessionCards').replaceChildren();
-    if (!sessions.length) { $('#sessionCards').textContent = 'The next batch of memories is on its way. Check back after your session.'; status('Your crew hasn’t published any sessions yet. Check back soon.'); return; }
+    if (!sessions.length) { $('#sessionChoices').textContent = 'Your next surf session will appear here once the crew publishes it.'; $('#sessionCards').textContent = 'The next batch of memories is on its way. Check back after your session.'; status('Your crew hasn’t published any sessions yet. Check back soon.'); return; }
     for (const session of sessions.slice(0, 3)) {
       const button = document.createElement('button'); button.className = 'session-card'; button.type = 'button';
       const img = document.createElement('img'); img.src = 'assets/mambo-jambo-surf-session.jpg'; img.alt = 'Mambo Jambo surf school — illustrative session photo'; img.loading = 'lazy';
@@ -51,15 +86,22 @@ async function loadSessions() {
     document.dispatchEvent(new Event('mj:sessions'));
     status();
   } catch (error) {
-    $('#sessionSelect').replaceChildren(new Option('Sessions currently unavailable', '')); $('#retrySessions').hidden = false;
+    $('#sessionChoices').textContent = 'We couldn’t load your sessions.'; $('#retrySessions').hidden = false;
     status(error.name === 'TimeoutError' ? 'Loading took too long. Please try again.' : error.message, true);
     $('#sessionCards').textContent = 'We couldn’t load the sessions. Use “Try loading sessions again” above to retry.';
-  }
+  } finally { $('#sessionChoices').setAttribute('aria-busy', 'false'); }
 }
 $('#retrySessions').addEventListener('click', loadSessions);
-$('#sessionSelect').addEventListener('change', () => { $('#nextStep').disabled = !$('#sessionSelect').value; });
-$('#nextStep').addEventListener('click', () => chooseSession($('#sessionSelect').value));
-$('#changeSession').addEventListener('click', () => { stage('session'); $('#sessionSelect').focus(); });
+$('#sessionFilter').addEventListener('input', event => {
+  const query = event.target.value.trim().toLowerCase();
+  let visible = 0;
+  document.querySelectorAll('.session-choice').forEach(choice => { choice.hidden = !choice.dataset.search.includes(query); if (!choice.hidden) visible++; });
+  $('#sessionNoResults').hidden = visible !== 0;
+});
+$('#nextStep').addEventListener('click', () => chooseSession(selectedSessionId));
+$('#changeSession').addEventListener('click', () => { stage('session'); $('#sessionFilter').value = ''; $('#sessionFilter').dispatchEvent(new Event('input'));
+  const input = $('#sessionChoices').querySelector('input:checked') || $('#sessionChoices').querySelector('input');
+  input?.focus(); });
 function updateSubmit() { $('#findMatches').disabled = !selectedFile || !$('#privacyConsent').checked; }
 $('#privacyConsent').addEventListener('change', updateSubmit);
 $('#selfieInput').addEventListener('change', async (event) => {
@@ -78,11 +120,12 @@ $('#selfieInput').addEventListener('change', async (event) => {
 $('#cancelSearch').addEventListener('click', () => { searchController?.abort(); });
 $('#searchForm').addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (searchController || !selectedFile || !$('#privacyConsent').checked || !$('#sessionSelect').value) return;
+  if (!$('#sessionStage').hidden) { if (selectedSessionId) chooseSession(selectedSessionId); return; }
+  if (searchController || !selectedFile || !$('#privacyConsent').checked || !selectedSessionId) return;
   stage('matching'); status('Matching your selfie…');
   const controller = new AbortController(); searchController = controller;
   let timedOut = false; const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 90000);
-  const form = new FormData(); form.append('sessionId', $('#sessionSelect').value); form.append('file', selectedFile); form.append('consent', 'true');
+  const form = new FormData(); form.append('sessionId', selectedSessionId); form.append('file', selectedFile); form.append('consent', 'true');
   try {
     const match = await requestApi('/api/match', { method: 'POST', body: form, signal: controller.signal });
     if (controller.signal.aborted) return;
