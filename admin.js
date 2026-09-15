@@ -594,167 +594,77 @@ document.getElementById('refreshBtn').addEventListener('click', () => loadDashbo
 
 // ── Crew Match Verification Queue ─────────────────────────────────────────────
 
-function drawCroppedFaceCanvas(canvasEl) {
-  const url = canvasEl.dataset.imgUrl;
-  let bboxNorm = null;
-  try {
-    bboxNorm = JSON.parse(canvasEl.dataset.bboxNorm || 'null');
-  } catch (e) {}
-
-  const img = new Image();
-  img.crossOrigin = 'anonymous';
-  img.onload = () => {
-    const ctx = canvasEl.getContext('2d');
-    const cw = canvasEl.width = 170;
-    const ch = canvasEl.height = 170;
-
-    let sx, sy, sw, sh;
-
-    if (bboxNorm && Array.isArray(bboxNorm) && bboxNorm.length === 4) {
-      const [topPct, leftPct, widthPct, heightPct] = bboxNorm;
-      const nw = img.naturalWidth;
-      const nh = img.naturalHeight;
-
-      const fx = (leftPct / 100) * nw;
-      const fy = (topPct / 100) * nh;
-      const fw = (widthPct / 100) * nw;
-      const fh = (heightPct / 100) * nh;
-
-      const pad = Math.max(fw, fh) * 0.3;
-      const side = Math.max(fw, fh) + (pad * 2);
-      const cx = fx + (fw / 2);
-      const cy = fy + (fh / 2);
-
-      sx = Math.max(0, cx - (side / 2));
-      sy = Math.max(0, cy - (side / 2));
-      sw = Math.min(nw - sx, side);
-      sh = Math.min(nh - sy, side);
-    } else {
-      const side = Math.min(img.naturalWidth, img.naturalHeight) * 0.38;
-      sx = (img.naturalWidth - side) / 2;
-      sy = img.naturalHeight * 0.12;
-      sw = side;
-      sh = side;
-    }
-
-    ctx.clearRect(0, 0, cw, ch);
-    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
-  };
-  img.src = url;
+const faceImages = new WeakMap();
+function renderFace(canvas, zoom = 1) {
+  const image = faceImages.get(canvas); if (!image) return;
+  const [top, left, width, height] = JSON.parse(canvas.dataset.bboxNorm);
+  const fullWidth = width / 100 * image.naturalWidth, fullHeight = height / 100 * image.naturalHeight;
+  const cropWidth = fullWidth / zoom, cropHeight = fullHeight / zoom;
+  const x = left / 100 * image.naturalWidth + (fullWidth - cropWidth) / 2;
+  const y = top / 100 * image.naturalHeight + (fullHeight - cropHeight) / 2;
+  const context = canvas.getContext('2d');
+  const scale = Math.min(canvas.width / cropWidth, canvas.height / cropHeight);
+  context.fillStyle = '#e7e2d6'; context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, x, y, cropWidth, cropHeight, (canvas.width - cropWidth * scale) / 2, (canvas.height - cropHeight * scale) / 2, cropWidth * scale, cropHeight * scale);
 }
-
+function drawCroppedFaceCanvas(canvas) {
+  const card = canvas.closest('.verify-card'); const image = new Image(); image.crossOrigin = 'anonymous';
+  image.onload = () => {
+    if (!canvas.isConnected) return;
+    faceImages.set(canvas, image); renderFace(canvas); canvas.dataset.ready = 'true';
+    if ([...card.querySelectorAll('canvas')].every(item => item.dataset.ready === 'true')) {
+      card.querySelector('.review-load-status').textContent = 'Compare the faces, then choose below.';
+      card.querySelectorAll('[data-action="confirm"],[data-action="reject"],input[type=range]').forEach(control => { control.disabled = false; });
+    }
+  };
+  image.onerror = () => { if (canvas.isConnected) card.querySelector('.review-load-status').textContent = 'A face could not load. Refresh the queue to renew the image links.'; };
+  image.src = canvas.dataset.imgUrl;
+}
 async function loadVerifyQueue() {
   const grid = document.getElementById('verifyGrid');
-  grid.innerHTML = '<p class="loading-msg">Loading match verification queue...</p>';
+  grid.innerHTML = '<p class="loading-msg">Looking for uncertain face pairs…</p>';
   try {
     const { queue, stats } = await apiRequest('/api/admin/verify-queue');
-
-    if (stats) {
-      const pendingEl = document.getElementById('verifyPending');
-      const confirmedEl = document.getElementById('verifyConfirmed');
-      const rejectedEl = document.getElementById('verifyRejected');
-      if (pendingEl) pendingEl.textContent = stats.pending || 0;
-      if (confirmedEl) confirmedEl.textContent = stats.confirmed || 0;
-      if (rejectedEl) rejectedEl.textContent = stats.rejected || 0;
-    }
-
-    if (!queue || !queue.length) {
-      grid.innerHTML = '<p class="empty-msg">All borderline face matches verified! Crew match queue is clean. 🤙</p>';
-      return;
-    }
-
-    grid.innerHTML = queue.map((item) => {
-      const bbox1Str = item.photo1.bboxNorm ? JSON.stringify(item.photo1.bboxNorm) : '';
-      const bbox2Str = item.photo2.bboxNorm ? JSON.stringify(item.photo2.bboxNorm) : '';
-
-      return `
-        <div class="verify-card" id="verify-card-${item.id}">
-          <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);padding-bottom:10px;">
-            <div style="font:11px var(--mono);color:var(--text);font-weight:600;">Session: ${escHtml(item.sessionTitle)}</div>
-            <span style="font:10px var(--mono);font-weight:700;padding:3px 9px;border-radius:20px;background:rgba(248,232,56,0.15);color:var(--marker);border:1px solid rgba(248,232,56,0.3);">Similarity: ${item.similarityPct}%</span>
-          </div>
-          <div class="verify-faces" style="margin-top:12px;">
-            <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
-              <div class="verify-face-wrapper" style="width:170px;height:170px;border-radius:12px;overflow:hidden;border:2px solid rgba(248,232,56,0.35);background:#000;position:relative;">
-                <canvas class="face-crop-canvas" data-img-url="${item.photo1.url}" data-bbox-norm='${escHtml(bbox1Str)}' width="170" height="170" style="width:100%;height:100%;display:block;"></canvas>
-                <span class="verify-zoom-tip">🔍 Isolated Face</span>
-              </div>
-              <a href="${item.photo1.url}" target="_blank" style="font:10px var(--mono);color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:underline;">${escHtml(item.photo1.filename)}</a>
-            </div>
-            <span class="verify-vs">VS</span>
-            <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
-              <div class="verify-face-wrapper" style="width:170px;height:170px;border-radius:12px;overflow:hidden;border:2px solid rgba(248,232,56,0.35);background:#000;position:relative;">
-                <canvas class="face-crop-canvas" data-img-url="${item.photo2.url}" data-bbox-norm='${escHtml(bbox2Str)}' width="170" height="170" style="width:100%;height:100%;display:block;"></canvas>
-                <span class="verify-zoom-tip">🔍 Isolated Face</span>
-              </div>
-              <a href="${item.photo2.url}" target="_blank" style="font:10px var(--mono);color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:underline;">${escHtml(item.photo2.filename)}</a>
-            </div>
-          </div>
-          <div class="verify-actions" style="margin-top:14px;">
-            <button class="confirm-btn" data-pair-id="${item.id}" data-action="confirm">✓ Confirm Same Surfer</button>
-            <button class="reject-btn" data-pair-id="${item.id}" data-action="reject">✗ Different Surfer</button>
-          </div>
-        </div>
-      `;
-    }).join('');
-
-    // Draw isolated face crops on canvases
-    document.querySelectorAll('.face-crop-canvas').forEach((canvas) => {
-      drawCroppedFaceCanvas(canvas);
-    });
-  } catch (err) {
-    grid.innerHTML = `<p class="loading-msg error-msg">${escHtml(err.message)}</p>`;
-  }
+    document.getElementById('verifyPending').textContent = stats.pending || 0;
+    document.getElementById('verifyConfirmed').textContent = stats.confirmed || 0;
+    document.getElementById('verifyRejected').textContent = stats.rejected || 0;
+    if (!queue?.length) { grid.innerHTML = '<p class="empty-msg">No uncertain face pairs available. Once photos finish processing, scan again to find pairs for review.</p>'; return; }
+    grid.innerHTML = queue.map(item => `
+      <article class="verify-card" id="verify-card-${escHtml(item.id)}">
+        <div class="review-heading"><div><span class="eyebrow">A SECOND PAIR OF EYES</span><h3>Same person, different moment?</h3><p>${escHtml(item.sessionTitle)}</p></div><span class="review-score">Similarity ${item.similarityPct}%<small>Near the matching cutoff</small></span></div>
+        <div class="verify-faces">${[item.photo1, item.photo2].map((photo, index) => `
+          <figure class="review-face"><figcaption>FACE ${index === 0 ? 'A' : 'B'}</figcaption><canvas class="face-crop-canvas" data-img-url="${escHtml(photo.url)}" data-bbox-norm="${escHtml(JSON.stringify(photo.bboxNorm))}" width="640" height="640" role="img" aria-label="Cropped face ${index === 0 ? 'A' : 'B'} for comparison"></canvas><p title="${escHtml(photo.filename)}">${escHtml(photo.filename)}</p></figure>`).join('')}</div>
+        <div class="review-zoom"><label>Zoom both faces <input type="range" min="1" max="2.5" step=".1" value="1" disabled><output>1×</output></label><button type="button" data-action="reset-zoom">Reset</button></div>
+        <p class="review-load-status" role="status">Loading isolated face crops…</p>
+        <div class="verify-actions"><button class="confirm-btn" data-pair-id="${escHtml(item.id)}" data-action="confirm" disabled>✓ Same person</button><button class="reject-btn" data-pair-id="${escHtml(item.id)}" data-action="reject" disabled>✕ Different people</button><button class="review-skip" data-pair-id="${escHtml(item.id)}" data-action="skip">Not sure · skip</button></div>
+      </article>`).join('');
+    grid.querySelectorAll('canvas').forEach(drawCroppedFaceCanvas);
+  } catch (error) { grid.innerHTML = `<p class="loading-msg error-msg">${escHtml(error.message)}</p>`; }
 }
-
-document.getElementById('verifyGrid').addEventListener('click', async (e) => {
-  const btn = e.target.closest('button[data-pair-id]');
-  if (!btn) return;
-  const pairId = btn.dataset.pairId;
-  const confirmed = btn.dataset.action === 'confirm';
-  const card = document.getElementById(`verify-card-${pairId}`);
-
-  btn.disabled = true;
-  btn.textContent = confirmed ? 'Confirming...' : 'Rejecting...';
-
-  try {
-    await apiRequest('/api/admin/confirm-match', {
-      method: 'POST',
-      body: JSON.stringify({ pairId, confirmed }),
-    });
-
-    if (card) {
-      card.style.transition = 'all 0.35s cubic-bezier(0.4, 0, 0.2, 1)';
-      card.style.opacity = '0';
-      card.style.transform = 'translateY(-12px) scale(0.95)';
-
-      setTimeout(() => {
-        card.remove();
-        const remaining = document.querySelectorAll('.verify-card');
-        if (!remaining.length) {
-          document.getElementById('verifyGrid').innerHTML = '<p class="empty-msg">All borderline face matches verified! Crew match queue is clean. 🤙</p>';
-        }
-      }, 350);
-    }
-
-    // Update pending counter
-    const pendingEl = document.getElementById('verifyPending');
-    if (pendingEl) {
-      const current = Math.max(0, Number(pendingEl.textContent || 0) - 1);
-      pendingEl.textContent = current;
-    }
-    if (confirmed) {
-      const confirmedEl = document.getElementById('verifyConfirmed');
-      if (confirmedEl) confirmedEl.textContent = Number(confirmedEl.textContent || 0) + 1;
-    } else {
-      const rejectedEl = document.getElementById('verifyRejected');
-      if (rejectedEl) rejectedEl.textContent = Number(rejectedEl.textContent || 0) + 1;
-    }
-  } catch (err) {
-    notifyCrew(err.message);
-    btn.disabled = false;
-    btn.textContent = confirmed ? '✓ Confirm Same Surfer' : '✗ Different Surfer';
+const reviewGrid = document.getElementById('verifyGrid');
+reviewGrid.addEventListener('input', event => {
+  if (!event.target.matches('input[type=range]')) return;
+  const card = event.target.closest('.verify-card'), zoom = Number(event.target.value);
+  card.querySelector('output').textContent = `${zoom.toFixed(1)}×`;
+  card.querySelectorAll('canvas').forEach(canvas => renderFace(canvas, zoom));
+});
+reviewGrid.addEventListener('click', async event => {
+  const button = event.target.closest('button[data-action]'); if (!button) return;
+  const card = button.closest('.verify-card');
+  if (button.dataset.action === 'reset-zoom') { const slider = card.querySelector('input'); slider.value = '1'; slider.dispatchEvent(new Event('input', { bubbles: true })); return; }
+  if (button.dataset.action === 'skip') {
+    card.remove(); if (!reviewGrid.querySelector('.verify-card')) reviewGrid.innerHTML = '<p class="empty-msg">No more pairs in this batch. Refresh to return to skipped pairs.</p>';
+    return;
   }
+  card.querySelectorAll('button').forEach(control => { control.disabled = true; });
+  const confirmed = button.dataset.action === 'confirm';
+  try {
+    await apiRequest('/api/admin/confirm-match', { method: 'POST', body: JSON.stringify({ pairId: button.dataset.pairId, confirmed }) });
+    card.remove();
+    const pending = document.getElementById('verifyPending'); pending.textContent = Math.max(0, Number(pending.textContent) - 1);
+    const count = document.getElementById(confirmed ? 'verifyConfirmed' : 'verifyRejected'); count.textContent = Number(count.textContent) + 1;
+    if (!reviewGrid.querySelector('.verify-card')) await loadVerifyQueue();
+  } catch (error) { card.querySelector('.review-load-status').textContent = error.message; card.querySelectorAll('button').forEach(control => { control.disabled = false; }); }
 });
 
 const rescanVerifyBtn = document.getElementById('rescanVerifyBtn');

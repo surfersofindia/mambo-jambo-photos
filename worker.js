@@ -213,75 +213,37 @@ async function consumePhoto(message, env) {
   }
 }
 
+function faceBounds(raw) {
+  let box; try { box = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return null; }
+  return Array.isArray(box) && box.length === 4 && box.every(Number.isFinite) && box[0] >= 0 && box[1] >= 0 && box[2] > 0 && box[3] > 0 && box[0] + box[3] <= 100.1 && box[1] + box[2] <= 100.1 ? box : null;
+}
 async function generateBorderlineMatches(env, targetSessionId = null) {
-  let query = `
-    SELECT f.id as face_id, f.photo_id, f.embedding_json, p.session_id, s.title as session_title
-    FROM faces f
-    JOIN photos p ON p.id = f.photo_id
-    JOIN sessions s ON s.id = p.session_id
-  `;
-  if (targetSessionId) {
-    query += ' WHERE p.session_id = ?';
-  }
-
+  let query = `SELECT f.id as face_id, f.photo_id, f.embedding_json, f.bbox_json, p.session_id
+    FROM faces f JOIN photos p ON p.id = f.photo_id
+    WHERE p.indexing_status = 'completed' AND f.bbox_json IS NOT NULL`;
+  if (targetSessionId) query += ' AND p.session_id = ?';
   const statement = env.DB.prepare(query);
-  const facesRes = await (targetSessionId ? statement.bind(targetSessionId) : statement).all();
-  const faces = facesRes.results;
-
+  const faces = (await (targetSessionId ? statement.bind(targetSessionId) : statement).all()).results
+    .filter(face => faceBounds(face.bbox_json)).map(face => { try { return { ...face, embedding: JSON.parse(face.embedding_json) }; } catch { return null; } }).filter(Boolean);
+  const seen = await env.DB.prepare('SELECT face1_id, face2_id FROM face_verifications').all();
+  const pairKey = (a, b) => [a, b].sort().join(':');
+  const existing = new Set(seen.results.map(pair => pairKey(pair.face1_id, pair.face2_id)));
+  const threshold = Number(env.MATCH_THRESHOLD || .62);
   const candidates = [];
-  const addedPairs = new Set();
-
-  for (let i = 0; i < faces.length; i++) {
-    const f1 = faces[i];
-    let emb1;
-    try { emb1 = JSON.parse(f1.embedding_json); } catch { continue; }
-
-    for (let j = i + 1; j < faces.length; j++) {
-      const f2 = faces[j];
-
-      // Never compare faces from the SAME photo
-      if (f1.photo_id === f2.photo_id) continue;
-      // Only compare within the same session
-      if (f1.session_id !== f2.session_id) continue;
-
-      const pairKey = f1.face_id < f2.face_id ? `${f1.face_id}:${f2.face_id}` : `${f2.face_id}:${f1.face_id}`;
-      if (addedPairs.has(pairKey)) continue;
-      addedPairs.add(pairKey);
-
-      let emb2;
-      try { emb2 = JSON.parse(f2.embedding_json); } catch { continue; }
-
-      const score = similarity(emb1, emb2);
-
-      // Tight borderline match zone: 0.58 <= score <= 0.64
-      if (score >= 0.58 && score <= 0.64) {
-        candidates.push({
-          verId: id(),
-          sessionId: f1.session_id,
-          face1Id: f1.face_id,
-          face2Id: f2.face_id,
-          score,
-          diff: Math.abs(score - 0.62)
-        });
-      }
-    }
+  for (let i = 0; i < faces.length; i++) for (let j = i + 1; j < faces.length; j++) {
+    const a = faces[i], b = faces[j];
+    if (a.photo_id === b.photo_id || a.session_id !== b.session_id || existing.has(pairKey(a.face_id, b.face_id))) continue;
+    const score = similarity(a.embedding, b.embedding);
+    if (!Number.isFinite(score) || Math.abs(score - threshold) > .06) continue;
+    const [first, second] = [a.face_id, b.face_id].sort();
+    candidates.push({ first, second, sessionId: a.session_id, score });
   }
-
-  // Pick top 5 candidates closest to 0.62 threshold
-  candidates.sort((a, b) => a.diff - b.diff);
-  const topCandidates = candidates.slice(0, 5);
-
-  const statements = topCandidates.map((c) => (
-    env.DB.prepare(`
-      INSERT OR IGNORE INTO face_verifications (id, session_id, face1_id, face2_id, similarity, status)
-      VALUES (?, ?, ?, ?, ?, 'pending')
-    `).bind(c.verId, c.sessionId, c.face1Id, c.face2Id, c.score)
-  ));
-
-  if (statements.length > 0) {
-    await env.DB.batch(statements);
-  }
-  return statements.length;
+  candidates.sort((a, b) => Math.abs(a.score - threshold) - Math.abs(b.score - threshold));
+  const statements = candidates.slice(0, 20).map(pair => env.DB.prepare(`INSERT OR IGNORE INTO face_verifications
+    (id, session_id, face1_id, face2_id, similarity, status) VALUES (?, ?, ?, ?, ?, 'pending')`).bind(id(), pair.sessionId, pair.first, pair.second, pair.score));
+  if (!statements.length) return 0;
+  const results = await env.DB.batch(statements);
+  return results.reduce((sum, result) => sum + Number(result.meta?.changes || 0), 0);
 }
 
 export default {
@@ -595,26 +557,27 @@ export default {
           JOIN photos p1 ON p1.id = f1.photo_id
           JOIN faces f2 ON f2.id = fv.face2_id
           JOIN photos p2 ON p2.id = f2.photo_id
-          WHERE fv.status = 'pending'
+          WHERE fv.status = 'pending' AND f1.bbox_json IS NOT NULL AND f2.bbox_json IS NOT NULL
+            AND p1.indexing_status = 'completed' AND p2.indexing_status = 'completed'
           ORDER BY fv.similarity DESC
           LIMIT 20
         `;
         const res = await env.DB.prepare(query).all();
 
-        const queue = await Promise.all(res.results.map(async (item) => ({
+        const queue = await Promise.all(res.results.filter(item => faceBounds(item.face1_bbox) && faceBounds(item.face2_bbox)).map(async (item) => ({
           id: item.id,
           sessionTitle: item.session_title,
           similarityPct: Math.round(item.similarity * 100),
           photo1: {
             id: item.photo1_id,
             filename: item.photo1_filename,
-            url: `${base}/api/media/${item.photo1_id}?variant=preview&token=${encodeURIComponent(await mediaToken(item.photo1_id, 'preview', env))}`,
+            url: `${base}/api/media/${item.photo1_id}?variant=original&token=${encodeURIComponent(await mediaToken(item.photo1_id, 'original', env))}`,
             bboxNorm: item.face1_bbox ? JSON.parse(item.face1_bbox) : null,
           },
           photo2: {
             id: item.photo2_id,
             filename: item.photo2_filename,
-            url: `${base}/api/media/${item.photo2_id}?variant=preview&token=${encodeURIComponent(await mediaToken(item.photo2_id, 'preview', env))}`,
+            url: `${base}/api/media/${item.photo2_id}?variant=original&token=${encodeURIComponent(await mediaToken(item.photo2_id, 'original', env))}`,
             bboxNorm: item.face2_bbox ? JSON.parse(item.face2_bbox) : null,
           },
         })));
@@ -634,13 +597,15 @@ export default {
       if (request.method === 'POST' && url.pathname === '/api/admin/confirm-match') {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
         const { pairId, confirmed } = await readJson(request);
+        if (typeof pairId !== 'string' || typeof confirmed !== 'boolean') return error('Choose same person or different people for a valid pair.', request, env);
         const newStatus = confirmed ? 'confirmed' : 'rejected';
 
-        await env.DB.prepare(`
+        const decision = await env.DB.prepare(`
           UPDATE face_verifications
           SET status = ?, updated_at = CURRENT_TIMESTAMP
-          WHERE id = ? OR (face1_id || '-' || face2_id) = ?
-        `).bind(newStatus, pairId, pairId).run();
+          WHERE id = ? AND status = 'pending'
+        `).bind(newStatus, pairId).run();
+        if (!decision.meta?.changes) return error('This pair was already reviewed or is no longer available. Refresh the queue.', request, env, 409);
 
         return response({ success: true, status: newStatus }, request, env);
       }

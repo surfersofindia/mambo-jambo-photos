@@ -74,3 +74,24 @@ test('browser-style uploads save both images and queue exactly one photo', async
   assert.equal(response.status, 201); assert.equal(stored.length, 2); assert.equal(messages.length, 1);
   assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM photos').get().n, 2);
 });
+test('review finds fresh uncertain pairs, returns precise crops, and records one decision', async context => {
+  const { env, sql, token } = await setup(context);
+  sql.exec("UPDATE photos SET indexing_status='completed'; INSERT INTO faces(id,photo_id,embedding_json,bbox_json) VALUES('anchor','photo','[1,0]','[10,10,20,30]');");
+  for (let i = 0; i < 7; i++) {
+    sql.prepare("INSERT INTO photos(id,session_id,object_key,preview_key,filename,content_type,indexing_status) VALUES(?,'session',?,?,?,'image/jpeg','completed')").run(`p${i}`, `o${i}`, `v${i}`, `shot${i}.jpg`);
+    sql.prepare('INSERT INTO faces(id,photo_id,embedding_json,bbox_json) VALUES(?,?,?,?)').run(`f${i}`, `p${i}`, JSON.stringify([.62, Math.sqrt(1 - .62 ** 2)]), '[15,15,18,24]');
+  }
+  // Existing pairs can be stored in either order; they must not reappear.
+  sql.exec("INSERT INTO face_verifications(id,session_id,face1_id,face2_id,similarity,status) VALUES('reviewed','session','f0','anchor',.62,'confirmed')");
+  const send = (path, body) => worker.fetch(new Request(`https://api.test${path}`, { method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${token}` }, ...(body ? { body: JSON.stringify(body) } : {}) }), env, {});
+  const response = await send('/api/admin/verify-queue'); assert.equal(response.status, 200);
+  const data = await response.json(); assert.equal(data.queue.length, 6);
+  assert.ok(data.queue.every(pair => pair.photo1.bboxNorm && pair.photo2.bboxNorm));
+  assert.ok(data.queue.every(pair => new URL(pair.photo1.url).searchParams.get('variant') === 'original'));
+  const pairId = data.queue[0].id;
+  assert.equal((await send('/api/admin/confirm-match', { pairId, confirmed: 'false' })).status, 400);
+  assert.equal((await send('/api/admin/confirm-match', { pairId, confirmed: false })).status, 200);
+  assert.equal(sql.prepare('SELECT status FROM face_verifications WHERE id=?').get(pairId).status, 'rejected');
+  assert.equal((await send('/api/admin/confirm-match', { pairId, confirmed: true })).status, 409);
+  assert.equal((await (await send('/api/admin/verify-queue/scan', {})).json()).generated, 0);
+});
