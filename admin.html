@@ -754,7 +754,7 @@
     <header class="topbar">
       <a class="topbar-brand" href="/">
         <img src="assets/mambo-jambo-logo.png" alt="" />
-        <span>Mambo Jambo <small>Admin</small></span>
+        <span>Mambo Jambo <small>CREW STUDIO</small></span>
       </a>
       <div class="topbar-right">
         <a class="back-link" href="/">← Back to site</a>
@@ -764,14 +764,14 @@
 
     <!-- ── Login screen ── -->
     <div class="admin-body" id="loginScreen">
-      <div class="login-screen">
+      <div class="login-screen"><aside class="login-story"><img src="assets/brand-surf-portrait.webp" alt="Mambo Jambo surfers out on the water"><div><span class="eyebrow">BEHIND THE GOOD DAYS</span><h1>You capture the waves.<br>We keep the memories.</h1><p>Your crew’s home for session photos.</p></div></aside>
         <div class="login-card">
           <span class="eyebrow">BACKSTAGE ACCESS</span>
-          <h2>Admin login</h2>
+          <h2>Welcome back, crew.</h2><p class="login-intro">Sign in to upload a session, organise photos and review matches.</p>
           <form id="loginForm">
             <label for="adminPassword">Password</label>
             <input id="adminPassword" type="password" autocomplete="current-password" placeholder="Enter admin password" required />
-            <div class="login-error" id="loginError"></div>
+            <div class="login-error" id="loginError" role="alert"></div>
             <button class="publish-btn" type="submit" style="width:100%;">Enter studio <span>→</span></button>
           </form>
         </div>
@@ -780,15 +780,15 @@
 
     <!-- ── Admin workspace ── -->
     <div class="admin-body hidden" id="adminApp">
-      <nav class="tabs">
-        <button class="tab-btn active" data-tab="upload">📂 Upload Session</button>
-        <button class="tab-btn" data-tab="dashboard">📊 Dashboard</button>
-        <button class="tab-btn" data-tab="verify">🤝 Verification Queue</button>
+      <div class="studio-heading"><div><span class="eyebrow">MAMBO JAMBO / CREW STUDIO</span><h1>Make the memories happen.</h1></div><span class="studio-badge">Preview mode · payments on hold</span></div><p id="adminNotice" class="admin-notice" role="status" hidden></p><nav class="tabs" role="tablist" aria-label="Crew workspace">
+        <button class="tab-btn active" id="nav-upload" role="tab" aria-controls="tab-upload" aria-selected="true" tabindex="0" data-tab="upload">01 &nbsp; Upload photos</button>
+        <button class="tab-btn" id="nav-dashboard" role="tab" aria-controls="tab-dashboard" aria-selected="false" tabindex="-1" data-tab="dashboard">02 &nbsp; Sessions</button>
+        <button class="tab-btn" id="nav-verify" role="tab" aria-controls="tab-verify" aria-selected="false" tabindex="-1" data-tab="verify">03 &nbsp; Review matches</button>
       </nav>
 
       <!-- Upload tab -->
-      <div class="tab-panel active" id="tab-upload">
-        <h2 class="section-title">New session upload</h2>
+      <div class="tab-panel active" id="tab-upload" role="tabpanel" aria-labelledby="nav-upload">
+        <h2 class="section-title">A fresh set of memories.</h2>
         <p class="section-sub">Fill in the session details, drop all the photos, then publish.</p>
 
         <form id="uploadForm">
@@ -815,11 +815,11 @@
             <span class="drop-icon">⬆</span>
             <h3>Drop today's session here</h3>
             <p>Photos are uploaded instantly and indexed in the background.<br />Guests can browse watermarked previews. Payments and downloads are on hold.</p>
-            <label class="choose-btn" for="adminPhotoInput">Choose photos ↑</label>
+            <button class="choose-btn" id="choosePhotos" type="button">Choose photos ↑</button>
             <input id="adminPhotoInput" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden />
           </div>
 
-          <div class="upload-status" id="uploadStatus"></div>
+          <div class="file-queue" id="fileQueue" hidden></div><div class="upload-status" id="uploadStatus" role="status"></div>
 
           <div class="progress-wrap hidden" id="progressWrap">
             <div class="progress-bar-track">
@@ -836,11 +836,11 @@
       </div>
 
       <!-- Dashboard tab -->
-      <div class="tab-panel" id="tab-dashboard">
+      <div class="tab-panel" id="tab-dashboard" role="tabpanel" aria-labelledby="nav-dashboard">
         <div class="dashboard-header">
           <div>
-            <h2 class="section-title">Session dashboard</h2>
-            <p class="section-sub">Background indexing status, download counts, and photo management.</p>
+            <h2 class="section-title">Your sessions.</h2>
+            <p class="section-sub">See what’s published, what’s processing and what needs attention.</p>
           </div>
           <button class="refresh-link" id="refreshBtn">↻ Refresh</button>
         </div>
@@ -848,12 +848,12 @@
         <!-- Metrics summary cards -->
         <div class="metrics-grid">
           <div class="metric-card">
-            <label>Total Revenue</label>
-            <div class="value" id="statRevenue">₹0</div>
+            <label>Ready photos</label>
+            <div class="value" id="statIndexed">0</div>
           </div>
           <div class="metric-card">
-            <label>Total Downloads</label>
-            <div class="value" id="statDownloads">0</div>
+            <label>Need attention</label>
+            <div class="value" id="statFailed">0</div>
           </div>
           <div class="metric-card">
             <label>Total Photos</label>
@@ -871,11 +871,11 @@
       </div>
 
       <!-- Verification Queue tab -->
-      <div class="tab-panel" id="tab-verify">
+      <div class="tab-panel" id="tab-verify" role="tabpanel" aria-labelledby="nav-verify">
         <div class="dashboard-header">
           <div>
             <h2 class="section-title">Crew Match Verification</h2>
-            <p class="section-sub">Help confirm borderline face matches to train & refine search accuracy for surfers.</p>
+            <p class="section-sub">Review possible matches and record your crew’s decisions. Reviews do not yet change automatic search results.</p>
           </div>
           <div style="display:flex;gap:10px;align-items:center;">
             <button class="btn-sm btn-primary-sm" id="rescanVerifyBtn">🔍 Rescan Borderline Matches</button>
@@ -906,11 +906,11 @@
     </div>
 
     <!-- ── Photo Gallery Modal ── -->
-    <div class="modal-overlay hidden" id="photoGalleryModal">
+    <dialog class="modal-overlay hidden" id="photoGalleryModal" aria-labelledby="galleryModalTitle">
       <div class="modal-card">
         <div class="modal-header">
           <h3 id="galleryModalTitle">Session Photos</h3>
-          <button class="modal-close" id="closeGalleryModal">×</button>
+          <button class="modal-close" id="closeGalleryModal" aria-label="Close photo gallery">×</button>
         </div>
         <div class="modal-body">
           <div class="admin-photo-grid" id="galleryGrid">
@@ -918,21 +918,21 @@
           </div>
         </div>
       </div>
-    </div>
+    </dialog>
 
     <!-- ── Edit Session Modal ── -->
-    <div class="modal-overlay hidden" id="editSessionModal">
+    <dialog class="modal-overlay hidden" id="editSessionModal" aria-labelledby="editModalTitle">
       <div class="modal-card" style="max-width: 500px;">
         <div class="modal-header">
-          <h3>Edit Session Details</h3>
-          <button class="modal-close" id="closeEditModal">×</button>
+          <h3 id="editModalTitle">Edit session details</h3>
+          <button class="modal-close" id="closeEditModal" aria-label="Close session editor">×</button>
         </div>
         <div class="modal-body">
           <form id="editSessionForm">
             <input type="hidden" id="editSessionId" />
             <div class="field" style="margin-bottom:14px;">
               <label for="editTitle">Title</label>
-              <input id="editTitle" type="text" required />
+              <input id="editTitle" type="text" maxlength="80" required />
             </div>
             <div class="field" style="margin-bottom:14px;">
               <label for="editDate">Date</label>
@@ -940,10 +940,10 @@
             </div>
             <div class="field" style="margin-bottom:14px;">
               <label for="editLocation">Location</label>
-              <input id="editLocation" type="text" required />
+              <input id="editLocation" type="text" maxlength="80" required />
             </div>
             <div class="field" style="margin-bottom:14px;">
-              <label for="editPrice">Price (₹)</label>
+              <label for="editPrice">Future price (₹) · on hold</label>
               <input id="editPrice" type="number" min="1" required />
             </div>
             <div class="field" style="margin-bottom:20px;">
@@ -958,7 +958,7 @@
           </form>
         </div>
       </div>
-    </div>
+    </dialog>
 
     <script src="config.js"></script>
     <script src="admin.js"></script>

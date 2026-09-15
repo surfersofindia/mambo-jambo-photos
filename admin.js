@@ -1,21 +1,4 @@
-/**
- * Mambo Jambo — Admin JS
- * Self-contained script for /admin.html only.
- * Bugs fixed:
- *  1. Sign-out: topbar "Sign out" was styled hidden by CSS class but
- *     the class toggle was correct — real issue was the button sitting
- *     OUTSIDE #adminApp so showApp() needed to show it independently. ✓
- *  2. Delete: CORS missing DELETE method (fixed in worker.js already). ✓
- *  3. Progress bar: called hideProgress() immediately after setting success
- *     status AND then again after 2s timeout — now only hides after 2s. ✓
- *  4. loadDashboard() called from showApp() even when dashboard tab is not
- *     active — wastes network requests on login. Now only loads on tab switch. ✓
- *  5. deleteSession: called via inline onclick string which breaks if
- *     session IDs have special chars. Switched to event delegation. ✓
- *  6. sign-out didn't clear dashInterval so auto-refresh kept running. ✓
- *  7. Login button text lost its <span>→</span> when re-enabled after error. ✓
- */
-
+// Mambo Jambo crew studio.
 const apiBase = (window.MJ_CONFIG?.apiUrl || '').replace(/\/$/, '');
 const isLive = Boolean(apiBase);
 const apiUrl = (path) => path.startsWith('http') ? path : `${apiBase}${path}`;
@@ -55,7 +38,7 @@ function showApp() {
   signOutBtn.classList.remove('hidden');   // show sign-out in topbar
   // Set today's date as default
   const dateInput = document.getElementById('adminDate');
-  if (!dateInput.value) dateInput.value = new Date().toISOString().slice(0, 10);
+  if (!dateInput.value) { const now = new Date(); dateInput.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`; }
   // Don't auto-load dashboard — only load when tab is clicked
 }
 
@@ -65,16 +48,16 @@ function showLogin() {
   adminApp.classList.add('hidden');
   loginScreen.classList.remove('hidden');
   signOutBtn.classList.add('hidden');
+  document.querySelectorAll('dialog[open]').forEach(modal => modal.close());
   // Reset tabs back to Upload so next login starts fresh
   document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
   document.querySelector('.tab-btn[data-tab="upload"]').classList.add('active');
   document.getElementById('tab-upload').classList.add('active');
+  document.querySelectorAll('.tab-btn').forEach(button => { button.setAttribute('aria-selected', String(button.dataset.tab === 'upload')); button.tabIndex = button.dataset.tab === 'upload' ? 0 : -1; });
 }
 
-if (isAuthenticated()) {
-  showApp();
-}
+
 
 // ── Sign out ──────────────────────────────────────────────────────────────────
 
@@ -118,9 +101,10 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
 
 document.querySelectorAll('.tab-btn').forEach((btn) => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
+    if (dashInterval) { clearInterval(dashInterval); dashInterval = null; }
+    document.querySelectorAll('.tab-btn').forEach(b => { b.classList.remove('active'); b.setAttribute('aria-selected', 'false'); b.tabIndex = -1; });
     document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
-    btn.classList.add('active');
+    btn.classList.add('active'); btn.setAttribute('aria-selected', 'true'); btn.tabIndex = 0;
     document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
     if (btn.dataset.tab === 'dashboard') loadDashboard();
     if (btn.dataset.tab === 'verify') loadVerifyQueue();
@@ -134,19 +118,30 @@ const closeGalleryModal = document.getElementById('closeGalleryModal');
 const editSessionModal  = document.getElementById('editSessionModal');
 const closeEditModal    = document.getElementById('closeEditModal');
 
-if (closeGalleryModal) {
-  closeGalleryModal.addEventListener('click', () => photoGalleryModal.classList.add('hidden'));
-}
-if (closeEditModal) {
-  closeEditModal.addEventListener('click', () => editSessionModal.classList.add('hidden'));
-}
-[photoGalleryModal, editSessionModal].forEach((modal) => {
-  if (modal) {
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) modal.classList.add('hidden');
-    });
-  }
+function openModal(modal) { modal.querySelector('.modal-notice')?.remove(); modal.classList.remove('hidden'); if (!modal.open) modal.showModal(); }
+[photoGalleryModal, editSessionModal].forEach(modal => {
+  modal.addEventListener('close', () => modal.classList.add('hidden'));
+  modal.addEventListener('click', event => { if (event.target === modal) modal.close(); });
 });
+closeGalleryModal.addEventListener('click', () => photoGalleryModal.close());
+closeEditModal.addEventListener('click', () => editSessionModal.close());
+document.querySelector('.tabs').addEventListener('keydown', event => {
+  const buttons = [...document.querySelectorAll('.tab-btn')]; const index = buttons.indexOf(document.activeElement);
+  if (index < 0 || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
+  buttons[next].focus(); buttons[next].click();
+});
+function notifyCrew(message) {
+  if (!loginScreen.classList.contains('hidden')) { document.getElementById('loginError').textContent = message; return; }
+  const modal = document.querySelector('dialog[open]');
+  let notice = document.getElementById('adminNotice');
+  if (modal) {
+    notice = modal.querySelector('.modal-notice');
+    if (!notice) { notice = document.createElement('p'); notice.className = 'admin-notice modal-notice'; notice.setAttribute('role', 'status'); modal.querySelector('.modal-body').prepend(notice); }
+  }
+  notice.textContent = message; notice.hidden = false;
+}
 
 // ── Upload: preview generation ────────────────────────────────────────────────
 
@@ -184,6 +179,7 @@ async function watermarkedPreview(file) {
 // ── Upload: file selection & drag/drop ────────────────────────────────────────
 
 let adminFiles = [];
+let uploadBusy = false;
 const dropZone = document.getElementById('adminDropZone');
 const photoInput = document.getElementById('adminPhotoInput');
 
@@ -214,13 +210,15 @@ function hideProgress() {
 }
 
 function selectFiles(files) {
+  if (uploadBusy) return;
   const selected = [...files];
   adminFiles = selected.filter(f => ['image/jpeg', 'image/png', 'image/webp'].includes(f.type) && f.size > 0 && f.size <= 25 * 1024 * 1024);
   if (adminFiles.length !== selected.length) {
-    adminFiles = [];
+    adminFiles = []; renderFileList();
     setStatus('Choose only JPG, PNG or WebP photos up to 25 MB each. Remove unsupported files and select again.', true);
     return;
   }
+  renderFileList();
   if (adminFiles.length) {
     setStatus(`${adminFiles.length} photo${adminFiles.length === 1 ? '' : 's'} selected. Click "Publish photo pack" to upload.`);
     window.setTimeout(() => document.getElementById('publishBtn').scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
@@ -228,6 +226,25 @@ function selectFiles(files) {
     setStatus('No valid images selected. Choose JPG, PNG or WebP files.', true);
   }
 }
+
+function renderFileList() {
+  const container = document.getElementById('fileQueue'); container.replaceChildren(); container.hidden = !adminFiles.length;
+  if (!adminFiles.length) return;
+  const header = document.createElement('div'); header.className = 'file-queue-head';
+  const summary = document.createElement('strong'); summary.textContent = `${adminFiles.length} photos · ${(adminFiles.reduce((sum, file) => sum + file.size, 0) / 1048576).toFixed(1)} MB`;
+  const clear = document.createElement('button'); clear.type = 'button'; clear.textContent = 'Clear selection'; clear.disabled = uploadBusy;
+  clear.addEventListener('click', () => { adminFiles = []; photoInput.value = ''; renderFileList(); clearStatus(); });
+  header.append(summary, clear); const list = document.createElement('ul');
+  adminFiles.forEach((file, index) => {
+    const row = document.createElement('li'); const name = document.createElement('span'); name.textContent = file.name;
+    const size = document.createElement('small'); size.textContent = `${(file.size / 1048576).toFixed(1)} MB`;
+    const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Remove'; remove.disabled = uploadBusy; remove.setAttribute('aria-label', `Remove ${file.name}`);
+    remove.addEventListener('click', () => { adminFiles.splice(index, 1); renderFileList(); }); row.append(name, size, remove); list.append(row);
+  });
+  container.append(header, list);
+}
+document.getElementById('choosePhotos').addEventListener('click', () => photoInput.click());
+window.addEventListener('beforeunload', event => { if (uploadBusy) { event.preventDefault(); event.returnValue = ''; } });
 
 photoInput.addEventListener('click', (e) => { e.target.value = null; });
 photoInput.addEventListener('change', (e) => selectFiles(e.target.files));
@@ -239,9 +256,14 @@ dropZone.addEventListener('drop', (e) => selectFiles(e.dataTransfer.files));
 
 document.getElementById('uploadForm').addEventListener('submit', async (e) => {
   e.preventDefault();
+  if (uploadBusy) return;
   if (!adminFiles.length) return setStatus('Choose at least one photo before publishing.', true);
 
   const publishBtn = document.getElementById('publishBtn');
+  uploadBusy = true;
+  document.querySelectorAll('#uploadForm input, #uploadForm button').forEach(control => { control.disabled = true; });
+  signOutBtn.disabled = true;
+  renderFileList();
   publishBtn.disabled = true;
   publishBtn.innerHTML = 'Publishing…';
   hideProgress();
@@ -276,11 +298,11 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
 
       xhr.upload.onprogress = (ev) => {
         if (ev.lengthComputable) {
-          fileProgress[index] = ev.loaded;
+          fileProgress[index] = Math.min(file.size, file.size * ev.loaded / ev.total);
           const uploaded = fileProgress.reduce((a, b) => a + b, 0);
           const elapsed = (performance.now() - startTime) / 1000;
           const speed = (uploaded / 1024) / Math.max(elapsed, 0.1);
-          const remaining = (totalBytes - uploaded) / 1024;
+          const remaining = Math.max(0, totalBytes - uploaded) / 1024;
           const eta = speed > 0 ? `ETA: ${Math.ceil(remaining / speed)}s` : '';
           const pct = Math.round((uploaded / totalBytes) * 100);
           setProgress(pct, speed, eta);
@@ -303,28 +325,17 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
     setStatus(`Uploading ${adminFiles.length} photo${adminFiles.length === 1 ? '' : 's'}…`);
     setProgress(0, 0, 'calculating...');
 
-    // Up to 10 concurrent uploads
+    // Wait for every in-flight upload before reporting failure. Limit memory use.
     const queue = adminFiles.map((file, index) => ({ file, index }));
-    let active = 0;
-    await new Promise((resolve, reject) => {
-      let failed = false;
-      const next = () => {
-        if (failed) return;
-        if (queue.length === 0 && active === 0) return resolve();
-        while (active < 10 && queue.length > 0) {
-          const { file, index } = queue.shift();
-          active++;
-          watermarkedPreview(file)
-            .then((preview) => uploadOne(file, preview, index))
-            .then(() => { active--; next(); })
-            .catch((err) => { if (!failed) { failed = true; reject(err); } });
-        }
-      };
-      next();
-    });
-
-    const photoCount = adminFiles.length;
-    const estMins = Math.max(1, Math.ceil((photoCount * 10) / 60));
+    const failures = [];
+    await Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => {
+      while (queue.length) {
+        const { file, index } = queue.shift();
+        try { await uploadOne(file, await watermarkedPreview(file), index); }
+        catch (error) { failures.push(`${file.name}: ${error.message}`); }
+      }
+    }));
+    if (failures.length) throw new Error(`${failures.length} upload(s) failed. The draft is still private; open Sessions to review uploaded photos. ${failures[0]}`);
 
     // Mark session published
     await apiRequest(`/api/admin/sessions/${sessionId}/publish`, { method: 'POST' });
@@ -332,22 +343,18 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
     photoInput.value = '';
     if (typeof renderFileList === 'function') renderFileList();
     setProgress(100, 0, '');
-    setStatus(`✓ Published! Your session is now live. Background face indexing will take ~${estMins} min${estMins > 1 ? 's' : ''} to complete.`);
+    setStatus('Published! Your session is live. Open Sessions to follow photo processing.');
     
-    publishBtn.innerHTML = 'Published! ✓';
-    publishBtn.classList.add('published-state');
-
-    setTimeout(() => hideProgress(), 1800);
-    setTimeout(() => {
-      publishBtn.disabled = false;
-      publishBtn.classList.remove('published-state');
-      publishBtn.innerHTML = 'Publish photo pack <span>→</span>';
-    }, 4000);
+    hideProgress();
   } catch (err) {
     setStatus(err.message || 'Upload failed. Your draft session is still private.', true);
     hideProgress();
-    publishBtn.disabled = false;
-    publishBtn.classList.remove('published-state');
+  } finally {
+    uploadBusy = false;
+    document.querySelectorAll('#uploadForm input, #uploadForm button').forEach(control => { control.disabled = false; });
+    signOutBtn.disabled = false;
+    publishBtn.innerHTML = 'Publish photo pack <span>→</span>';
+    renderFileList();
   }
 });
 
@@ -357,6 +364,7 @@ let dashInterval = null;
 
 async function loadDashboard(silent = false) {
   const grid = document.getElementById('dashboardGrid');
+  if (!isAuthenticated()) return;
   if (!silent) grid.innerHTML = '<p class="loading-msg">Loading sessions...</p>';
   try {
     const { sessions } = await apiRequest('/api/admin/dashboard');
@@ -408,7 +416,7 @@ async function loadDashboard(silent = false) {
             <div><span>Date</span><strong style="font-size:13px;font-weight:500">${escHtml(s.date || '—')}</strong></div>
             <div><span>Location</span><strong style="font-size:13px;font-weight:500">${escHtml(s.location || '—')}</strong></div>
             <div><span>Indexing Progress</span><strong>${pct}% (${indexed} / ${total})</strong></div>
-            <div><span>Downloads</span><strong>${s.downloads}</strong></div>
+            <div><span>Need attention</span><strong>${failed}</strong></div>
             <div class="spacer"></div>
           </div>
           ${total > 0 ? `
@@ -426,8 +434,8 @@ async function loadDashboard(silent = false) {
       `;
     }).join('');
 
-    if (hasPending && !dashInterval) {
-      dashInterval = setInterval(() => loadDashboard(true), 3000);
+    if (hasPending && !dashInterval && document.getElementById('tab-dashboard').classList.contains('active')) {
+      dashInterval = setInterval(() => { if (!document.hidden) loadDashboard(true); }, 8000);
     } else if (!hasPending && dashInterval) {
       clearInterval(dashInterval); dashInterval = null;
     }
@@ -437,23 +445,11 @@ async function loadDashboard(silent = false) {
 }
 
 function updateMetrics(sessions) {
-  let totalDownloads = 0;
-  let totalPhotos = 0;
-  let totalRevenuePaise = 0;
-  let activeSessions = 0;
-
-  sessions.forEach((s) => {
-    totalDownloads += Number(s.downloads || 0);
-    totalPhotos += Number(s.total_photos || 0);
-    if (s.status === 'published') activeSessions++;
-    totalRevenuePaise += (Number(s.downloads || 0) * Number(s.price_paise || 29900));
-  });
-
-  const revRs = Math.round(totalRevenuePaise / 100);
-  document.getElementById('statRevenue').textContent = `₹${revRs.toLocaleString('en-IN')}`;
-  document.getElementById('statDownloads').textContent = totalDownloads;
-  document.getElementById('statPhotos').textContent = totalPhotos;
-  document.getElementById('statSessions').textContent = activeSessions;
+  const total = field => sessions.reduce((sum, session) => sum + Number(session[field] || 0), 0);
+  document.getElementById('statIndexed').textContent = total('indexed_photos').toLocaleString('en-IN');
+  document.getElementById('statFailed').textContent = total('failed_photos').toLocaleString('en-IN');
+  document.getElementById('statPhotos').textContent = total('total_photos').toLocaleString('en-IN');
+  document.getElementById('statSessions').textContent = sessions.filter(session => session.status === 'published').length;
 }
 
 // ── View Session Photos Modal ────────────────────────────────────────────────
@@ -465,7 +461,7 @@ async function viewSessionPhotos(sessionId, sessionTitle) {
   
   titleEl.textContent = `Photos — ${sessionTitle}`;
   grid.innerHTML = '<p class="loading-msg">Loading session photos...</p>';
-  modal.classList.remove('hidden');
+  openModal(modal);
 
   try {
     const { photos } = await apiRequest(`/api/admin/sessions/${sessionId}/photos`);
@@ -498,7 +494,7 @@ document.getElementById('galleryGrid').addEventListener('click', async (e) => {
     if (card) card.remove();
     loadDashboard(true);
   } catch (err) {
-    alert(err.message);
+    notifyCrew(err.message);
     btn.disabled = false;
     btn.textContent = 'Delete';
   }
@@ -515,16 +511,19 @@ document.getElementById('editSessionForm').addEventListener('submit', async (e) 
   const pricePaise = Math.round(Number(document.getElementById('editPrice').value) * 100);
   const status = document.getElementById('editStatus').value;
 
+  const saveButton = e.currentTarget.querySelector('button[type=submit]');
+  if (saveButton.disabled) return;
+  saveButton.disabled = true; saveButton.textContent = 'Saving…';
   try {
     await apiRequest(`/api/admin/sessions/${sessionId}`, {
       method: 'PUT',
       body: JSON.stringify({ title, date, location, pricePaise, status }),
     });
-    document.getElementById('editSessionModal').classList.add('hidden');
+    editSessionModal.close();
     loadDashboard();
   } catch (err) {
-    alert(err.message);
-  }
+    notifyCrew(err.message);
+  } finally { saveButton.disabled = false; saveButton.textContent = 'Save changes'; }
 });
 
 // ── Session Card Action Event Delegation ──────────────────────────────────────
@@ -545,7 +544,7 @@ document.getElementById('dashboardGrid').addEventListener('click', async (e) => 
     document.getElementById('editLocation').value = editBtn.dataset.location;
     document.getElementById('editPrice').value = editBtn.dataset.price;
     document.getElementById('editStatus').value = editBtn.dataset.status;
-    document.getElementById('editSessionModal').classList.remove('hidden');
+    openModal(editSessionModal);
     return;
   }
 
@@ -556,10 +555,10 @@ document.getElementById('dashboardGrid').addEventListener('click', async (e) => 
     reindexBtn.textContent = 'Re-indexing...';
     try {
       const res = await apiRequest(`/api/admin/sessions/${reindexBtn.dataset.sessionId}/reindex`, { method: 'POST' });
-      alert(`✓ Successfully re-indexed ${res.reindexed || 0} photo${res.reindexed === 1 ? '' : 's'}!`);
+      notifyCrew(`Processed ${res.reindexed || 0} photo${res.reindexed === 1 ? '' : 's'}. Check the session status for any failures.`);
       loadDashboard();
     } catch (err) {
-      alert(err.message);
+      notifyCrew(err.message);
     } finally {
       reindexBtn.disabled = false;
       reindexBtn.textContent = '🔄 Re-index';
@@ -578,7 +577,7 @@ document.getElementById('dashboardGrid').addEventListener('click', async (e) => 
       await apiRequest(`/api/admin/sessions/${id}`, { method: 'DELETE' });
       loadDashboard();
     } catch (err) {
-      alert(err.message);
+      notifyCrew(err.message);
       deleteBtn.disabled = false;
       deleteBtn.textContent = 'Delete';
     }
@@ -747,7 +746,7 @@ document.getElementById('verifyGrid').addEventListener('click', async (e) => {
       if (rejectedEl) rejectedEl.textContent = Number(rejectedEl.textContent || 0) + 1;
     }
   } catch (err) {
-    alert(err.message);
+    notifyCrew(err.message);
     btn.disabled = false;
     btn.textContent = confirmed ? '✓ Confirm Same Surfer' : '✗ Different Surfer';
   }
@@ -760,10 +759,10 @@ if (rescanVerifyBtn) {
     rescanVerifyBtn.textContent = 'Scanning...';
     try {
       const res = await apiRequest('/api/admin/verify-queue/scan', { method: 'POST' });
-      alert(`✓ Borderline scan complete! Found ${res.generated || 0} candidate pair(s) for verification.`);
+      notifyCrew(`✓ Borderline scan complete! Found ${res.generated || 0} candidate pair(s) for verification.`);
       loadVerifyQueue();
     } catch (err) {
-      alert(err.message);
+      notifyCrew(err.message);
     } finally {
       rescanVerifyBtn.disabled = false;
       rescanVerifyBtn.textContent = '🔍 Rescan Borderline Matches';
@@ -782,3 +781,5 @@ function escHtml(str) {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+
+if (isAuthenticated()) showApp();

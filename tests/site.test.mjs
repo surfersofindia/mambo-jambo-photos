@@ -20,3 +20,14 @@ test('guest script selectors resolve to unique elements', async () => {
   assert.equal(ids.length, new Set(ids).size);
   for (const [, id] of script.matchAll(/\$\('#([\w-]+)'\)/g)) assert.ok(ids.includes(id), `Missing #${id}`);
 });
+
+test('crew controls and accessible tab panels have valid targets', async () => {
+  const html = await readFile(new URL('admin.html', root), 'utf8');
+  const script = await readFile(new URL('admin.js', root), 'utf8');
+  const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
+  assert.equal(ids.length, new Set(ids).size);
+  for (const [, id] of script.matchAll(/getElementById\('([\w-]+)'\)/g)) assert.ok(ids.includes(id), `Missing crew control #${id}`);
+  for (const [, id] of html.matchAll(/aria-(?:controls|labelledby)="([^"]+)"/g)) assert.ok(ids.includes(id));
+  assert.equal((html.match(/<dialog\b/g) || []).length, 2);
+  assert.equal((html.match(/<\/dialog>/g) || []).length, 2);
+});
