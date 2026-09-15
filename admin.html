@@ -271,12 +271,14 @@
         color: var(--ink);
         font-weight: 700;
         font-size: 13px;
-        padding: 11px 20px;
+        padding: 12px 24px;
         border-radius: 50px;
         cursor: pointer;
-        transition: transform .2s, box-shadow .2s;
+        border: none;
+        transition: transform .25s cubic-bezier(.34,1.56,.64,1), box-shadow .25s ease, background .25s ease;
       }
-      .choose-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 0 rgba(0,0,0,.3); }
+      .choose-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(248,232,56,.25); background: #ffffff; }
+      .choose-btn:active { transform: translateY(0); }
 
       /* ── Progress ── */
       .progress-wrap { margin-bottom: 16px; }
@@ -322,16 +324,21 @@
         font-size: 15px;
         padding: 15px 28px;
         border-radius: 50px;
-        transition: transform .25s cubic-bezier(.34,1.56,.64,1), box-shadow .25s;
+        border: none;
+        cursor: pointer;
+        transition: transform .25s cubic-bezier(.34,1.56,.64,1), box-shadow .25s ease, background .25s ease;
         display: inline-block;
         margin-top: 8px;
       }
       .publish-btn:hover {
         transform: translateY(-3px);
-        box-shadow: 0 9px 0 rgba(0,0,0,.3);
+        box-shadow: 0 10px 24px rgba(208,96,80,.35);
+        background: #e06858;
       }
+      .publish-btn:active { transform: translateY(-1px); }
       .publish-btn:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
-      .publish-btn span { font-size: 20px; margin-left: 14px; }
+      .publish-btn span { font-size: 20px; margin-left: 14px; display: inline-block; transition: transform .2s ease; }
+      .publish-btn:hover span { transform: translateX(4px); }
 
       /* ── Dashboard cards ── */
       .dashboard-grid {
@@ -343,7 +350,9 @@
         border: 1px solid var(--border);
         border-radius: 10px;
         padding: 20px 24px;
+        transition: border-color .2s ease, transform .2s ease;
       }
+      .d-card:hover { border-color: rgba(255,255,255,0.18); transform: translateY(-1px); }
       .d-card-head {
         display: flex;
         align-items: center;
@@ -373,7 +382,7 @@
       .d-card-stats strong { font-size: 18px; font-weight: 700; }
       .d-card-stats .spacer { flex: 1; }
       .delete-btn {
-        background: rgba(208,96,80,.15);
+        background: rgba(208,96,80,.12);
         color: var(--coral);
         border: 1px solid rgba(208,96,80,.25);
         font: 10px var(--mono);
@@ -381,25 +390,29 @@
         letter-spacing: 1px;
         padding: 7px 14px;
         border-radius: 6px;
-        transition: background .2s, border-color .2s;
+        cursor: pointer;
+        transition: background .2s ease, border-color .2s ease, color .2s ease, transform .15s ease;
       }
       .delete-btn:hover {
-        background: rgba(208,96,80,.3);
+        background: rgba(208,96,80,.28);
         border-color: var(--coral);
+        transform: translateY(-1px);
       }
+      .delete-btn:active { transform: translateY(0); }
       .refresh-link {
         background: none;
         color: var(--muted);
         font: 10px var(--mono);
         text-transform: uppercase;
         letter-spacing: 1px;
-        padding: 0;
+        padding: 4px 8px;
+        border-radius: 4px;
         text-decoration: underline;
-        transition: color .2s;
+        transition: color .2s ease, background .2s ease;
         cursor: pointer;
         border: none;
       }
-      .refresh-link:hover { color: var(--text); }
+      .refresh-link:hover { color: var(--text); background: rgba(255,255,255,0.05); }
       .dashboard-header {
         display: flex;
         align-items: baseline;
