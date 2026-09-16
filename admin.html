@@ -318,14 +318,36 @@
       .upload-status.visible { display: block; }
       .upload-status.error { color: var(--coral); border-color: rgba(208,96,80,.3); }
 
+      /* ── Live per-photo upload list ── */
+      .photo-list { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow: auto; }
+      .photo-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); font-size: 11px; transition: opacity .25s ease; }
+      .photo-row:first-child { border-top: 0; }
+      .photo-row[data-state="skipped"] { opacity: .5; }
+      .photo-row-thumb { position: relative; flex: none; width: 46px; height: 46px; border-radius: 6px; overflow: hidden; background: #ede4d0; }
+      .photo-row-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+      .photo-row-status { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font: 700 13px/1 var(--sans); font-style: normal; background: rgba(43,32,24,.45); opacity: 0; transition: opacity .2s ease, background .2s ease; }
+      .photo-row:not([data-state="waiting"]) .photo-row-status { opacity: 1; }
+      .photo-row[data-state="uploading"] .photo-row-status::after { content: ''; width: 18px; height: 18px; border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; border-radius: 50%; animation: review-spin .8s linear infinite; }
+      /* Finished states keep the photo visible and mark it with a corner badge. */
+      .photo-row[data-state="done"] .photo-row-status, .photo-row[data-state="failed"] .photo-row-status, .photo-row[data-state="skipped"] .photo-row-status { background: transparent; place-items: end; }
+      .photo-row[data-state="done"] .photo-row-status::after, .photo-row[data-state="failed"] .photo-row-status::after, .photo-row[data-state="skipped"] .photo-row-status::after { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; margin: 0 3px 3px 0; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
+      .photo-row[data-state="done"] .photo-row-status::after { content: '✓'; background: #32634e; }
+      .photo-row[data-state="failed"] .photo-row-status::after { content: '✕'; background: #a3372b; }
+      .photo-row[data-state="skipped"] .photo-row-status::after { content: '–'; background: #6d6052; }
+      .photo-row-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+      .photo-row-name small { display: block; color: var(--muted); margin-top: 3px; }
+      .photo-row-tag { flex: none; font: 9px var(--mono); font-style: normal; letter-spacing: .5px; text-transform: uppercase; padding: 4px 8px; border-radius: 12px; background: #f6f0dc; color: #786023; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .photo-row-tag:empty { display: none; }
+      .photo-row-tag[data-kind="ok"] { background: #e8f0ec; color: #32634e; }
+      .photo-row-tag[data-kind="error"] { background: #faeeeb; color: #a3372b; }
+      .file-queue[data-uploading] .photo-row button, .file-queue[data-finished] .photo-row button { display: none; }
+      @media (prefers-reduced-motion: reduce) { .photo-row[data-state="uploading"] .photo-row-status::after { animation: none; border-color: #fff; } }
+
       /* ── Upload more: duplicate handling ── */
       .more-summary { font-size: 13px; line-height: 1.7; margin-bottom: 16px; }
       .more-summary strong { color: var(--ocean); }
-      .more-duplicates { border: 1px solid var(--border); border-radius: 9px; padding: 14px 16px; margin-bottom: 18px; background: #fff; }
-      .more-duplicates h4 { font: 600 12px var(--sans); margin-bottom: 8px; }
-      .more-duplicates ul { list-style: none; max-height: 160px; overflow: auto; font: 11px var(--mono); color: var(--muted); }
-      .more-duplicates li { padding: 5px 0; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
-      .more-duplicates li:first-child { border-top: 0; }
+      .more-photos { border: 1px solid var(--border); border-radius: 9px; padding: 14px 16px; margin-bottom: 18px; background: #fff; }
+      .more-photos h4 { font: 600 12px var(--sans); margin-bottom: 6px; }
       .more-choice { border: 0; padding: 0; margin: 0 0 18px; display: grid; gap: 10px; }
       .more-choice[hidden] { display: none; }
       .more-choice legend { font: 600 12px var(--sans); margin-bottom: 10px; }
@@ -337,6 +359,9 @@
       .more-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
       .more-cancel { background: transparent; border: 1px solid var(--border); border-radius: 30px; padding: 14px 22px; font: 600 12px var(--sans); color: var(--text); cursor: pointer; }
       .more-cancel:hover { background: #ede4d0; }
+      .more-retry { background: transparent; border: 1px solid #b5502f55; border-radius: 30px; padding: 14px 22px; font: 600 12px var(--sans); color: #a3372b; cursor: pointer; }
+      .more-retry:hover { background: #faeeeb; }
+      .more-retry[hidden] { display: none; }
 
       /* ── Publish button ── */
       .publish-btn {
@@ -899,9 +924,11 @@
             <h2 class="section-title">Crew Match Verification</h2>
             <p class="section-sub">Review possible matches and record your crew’s decisions. Reviews do not yet change automatic search results.</p>
           </div>
-          <div style="display:flex;gap:10px;align-items:center;">
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
             <button class="btn-sm btn-primary-sm" id="rescanVerifyBtn">🔍 Rescan Borderline Matches</button>
             <button class="refresh-link" id="refreshVerifyBtn">↻ Refresh Queue</button>
+            <button class="btn-sm" id="retrainBtn" title="Refit fallback-match scoring from every confirmed/rejected review so far">🧠 Retrain from Reviews</button>
+            <span class="admin-notice" id="retrainStatus" style="margin:0;padding:6px 12px;font-size:10px;" hidden></span>
           </div>
         </div>
 
@@ -923,6 +950,37 @@
 
         <p class="admin-notice" id="reviewUnavailable" role="status" hidden></p><div class="verify-grid" id="verifyGrid">
           <p class="loading-msg">Loading match verification queue...</p>
+        </div>
+
+        <!-- Burst & Appearance Fallback Links -->
+        <div class="dashboard-header" style="margin-top:48px;">
+          <div>
+            <h2 class="section-title">Burst &amp; Appearance Matches</h2>
+            <p class="section-sub">Photos with no clear face, linked to a confirmed shot by burst timing or clothing appearance. Confirming a link lets guests find these photos automatically; pending links never do.</p>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <button class="btn-sm btn-primary-sm" id="rescanLinkBtn">🔍 Scan Burst &amp; Appearance Links</button>
+            <button class="refresh-link" id="refreshLinkBtn">↻ Refresh Queue</button>
+          </div>
+        </div>
+
+        <div class="metrics-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 24px;">
+          <div class="metric-card">
+            <label>Ready to review</label>
+            <div class="value" id="linkPending">0</div>
+          </div>
+          <div class="metric-card">
+            <label>Confirmed Links</label>
+            <div class="value" id="linkConfirmed" style="color:#4caf50;">0</div>
+          </div>
+          <div class="metric-card">
+            <label>Dismissed / Rejected</label>
+            <div class="value" id="linkRejected" style="color:var(--coral);">0</div>
+          </div>
+        </div>
+
+        <div class="verify-grid" id="linkGrid">
+          <p class="loading-msg">Loading burst &amp; appearance match queue...</p>
         </div>
       </div>
     </div>
@@ -992,9 +1050,9 @@
         </div>
         <div class="modal-body">
           <p class="more-summary" id="moreSummary" role="status">Checking your selection…</p>
-          <div class="more-duplicates" id="moreDuplicates" hidden>
-            <h4 id="moreDuplicatesTitle">Already in this session</h4>
-            <ul id="moreDuplicateList"></ul>
+          <div class="more-photos" id="morePhotos" hidden>
+            <h4 id="morePhotosTitle">Selected photos</h4>
+            <ul class="photo-list" id="morePhotoList"></ul>
           </div>
           <fieldset class="more-choice" id="moreChoice" hidden>
             <legend>What should happen with the duplicates?</legend>
@@ -1009,6 +1067,7 @@
           </div>
           <div class="more-actions">
             <button class="more-cancel" type="button" id="moreCancelBtn">Cancel</button>
+            <button class="more-retry" type="button" id="moreRetryBtn" hidden>Retry failed uploads</button>
             <button class="publish-btn" type="button" id="moreConfirmBtn" disabled>Upload photos <span>→</span></button>
           </div>
         </div>

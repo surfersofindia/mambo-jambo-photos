@@ -116,7 +116,7 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
     btn.classList.add('active'); btn.setAttribute('aria-selected', 'true'); btn.tabIndex = 0;
     document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
     if (btn.dataset.tab === 'dashboard') loadDashboard();
-    if (btn.dataset.tab === 'verify') loadVerifyQueue();
+    if (btn.dataset.tab === 'verify') { loadVerifyQueue(); loadLinkQueue(); }
   });
 });
 
@@ -244,19 +244,66 @@ function selectFiles(files) {
   }
 }
 
+// ── Upload: live per-photo rows ───────────────────────────────────────────────
+
+// Object URLs are created lazily per File and revoked when the list that showed them goes away.
+const thumbnailUrls = new Map();
+function thumbnailFor(file) {
+  if (!thumbnailUrls.has(file)) thumbnailUrls.set(file, URL.createObjectURL(file));
+  return thumbnailUrls.get(file);
+}
+function releaseThumbnails(files) {
+  for (const file of files) { const url = thumbnailUrls.get(file); if (url) { URL.revokeObjectURL(url); thumbnailUrls.delete(file); } }
+}
+const ROW_LABELS = { waiting: 'Waiting to upload', uploading: 'Uploading…', done: 'Uploaded', failed: 'Upload failed', skipped: 'Skipped' };
+// One list row: thumbnail with a status overlay, filename + size, optional tag and trailing control.
+function photoRow(file, { tag = '', control } = {}) {
+  const row = document.createElement('li'); row.className = 'photo-row'; row.dataset.state = 'waiting';
+  const thumb = document.createElement('div'); thumb.className = 'photo-row-thumb';
+  const image = document.createElement('img'); image.src = thumbnailFor(file); image.alt = ''; image.loading = 'lazy'; image.decoding = 'async';
+  const status = document.createElement('i'); status.className = 'photo-row-status'; status.setAttribute('role', 'img'); status.setAttribute('aria-label', ROW_LABELS.waiting);
+  thumb.append(image, status);
+  const name = document.createElement('span'); name.className = 'photo-row-name'; name.textContent = file.name;
+  const size = document.createElement('small'); size.textContent = `${(file.size / 1048576).toFixed(1)} MB`; name.append(size);
+  const badge = document.createElement('em'); badge.className = 'photo-row-tag'; badge.textContent = tag; badge.title = tag;
+  row.append(thumb, name, badge);
+  if (control) row.append(control);
+  return row;
+}
+function setRowState(row, state, { tag, kind, title } = {}) {
+  if (!row) return;
+  row.dataset.state = state;
+  const status = row.querySelector('.photo-row-status');
+  status.setAttribute('aria-label', title || ROW_LABELS[state] || state); status.title = title || '';
+  if (tag !== undefined) { const badge = row.querySelector('.photo-row-tag'); badge.textContent = tag; badge.title = tag; if (kind) badge.dataset.kind = kind; else delete badge.dataset.kind; }
+  if (state === 'uploading') row.scrollIntoView({ block: 'nearest' });
+}
+// Translate one upload result into a row state so both flows show identical ticks.
+function markRowFromResult(row, state, detail) {
+  if (state === 'failed') return setRowState(row, 'failed', { tag: 'Failed', kind: 'error', title: detail?.message });
+  if (state !== 'done') return setRowState(row, state, { tag: '' });
+  if (detail?.skipped) return setRowState(row, 'skipped', { tag: 'Already in session' });
+  if (detail?.duplicate === 'renamed') return setRowState(row, 'done', { tag: `Saved as ${detail.filename}`, kind: 'ok' });
+  if (detail?.duplicate === 'replaced') return setRowState(row, 'done', { tag: 'Replaced existing', kind: 'ok' });
+  setRowState(row, 'done', { tag: '' });
+}
+
+let queueFiles = []; // Files whose thumbnails the Upload tab list currently shows.
 function renderFileList() {
   const container = document.getElementById('fileQueue'); container.replaceChildren(); container.hidden = !adminFiles.length;
+  delete container.dataset.uploading; delete container.dataset.finished;
+  releaseThumbnails(queueFiles.filter(file => !adminFiles.includes(file)));
+  queueFiles = [...adminFiles];
   if (!adminFiles.length) return;
   const header = document.createElement('div'); header.className = 'file-queue-head';
   const summary = document.createElement('strong'); summary.textContent = `${adminFiles.length} photos · ${(adminFiles.reduce((sum, file) => sum + file.size, 0) / 1048576).toFixed(1)} MB`;
   const clear = document.createElement('button'); clear.type = 'button'; clear.textContent = 'Clear selection'; clear.disabled = uploadBusy;
   clear.addEventListener('click', () => { adminFiles = []; photoInput.value = ''; renderFileList(); clearStatus(); });
-  header.append(summary, clear); const list = document.createElement('ul');
+  header.append(summary, clear); const list = document.createElement('ul'); list.className = 'photo-list';
   adminFiles.forEach((file, index) => {
-    const row = document.createElement('li'); const name = document.createElement('span'); name.textContent = file.name;
-    const size = document.createElement('small'); size.textContent = `${(file.size / 1048576).toFixed(1)} MB`;
     const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Remove'; remove.disabled = uploadBusy; remove.setAttribute('aria-label', `Remove ${file.name}`);
-    remove.addEventListener('click', () => { adminFiles.splice(index, 1); renderFileList(); }); row.append(name, size, remove); list.append(row);
+    remove.addEventListener('click', () => { adminFiles.splice(index, 1); renderFileList(); });
+    list.append(photoRow(file, { control: remove }));
   });
   container.append(header, list);
 }
@@ -271,9 +318,16 @@ dropZone.addEventListener('drop', (e) => selectFiles(e.dataTransfer.files));
 
 // ── Upload: shared batch sender ───────────────────────────────────────────────
 
-// Send originals plus watermarked previews three at a time and report combined progress.
-// Each item is { file, onDuplicate? }. Resolves with per-file results and failures.
-async function uploadPhotoBatch(sessionId, items, onProgress) {
+// Keep concurrent uploads under a memory budget: the Worker buffers each original fully,
+// so several large files at once can exceed its limit and drop connections.
+const UPLOAD_MAX_WORKERS = 3;
+const UPLOAD_BYTE_BUDGET = 20 * 1024 * 1024; // ~20 MB of originals in flight at once
+const UPLOAD_MAX_ATTEMPTS = 3;
+
+// Send originals plus watermarked previews and report combined progress.
+// Each item is { file, onDuplicate? }. onItem(index, state, detail) fires as each photo starts and finishes.
+// Resolves with per-file results and failures.
+async function uploadPhotoBatch(sessionId, items, onProgress, onItem = () => {}) {
   const totalBytes = items.reduce((sum, item) => sum + item.file.size, 0);
   const startTime = performance.now();
   const fileProgress = new Array(items.length).fill(0);
@@ -295,7 +349,8 @@ async function uploadPhotoBatch(sessionId, items, onProgress) {
     xhr.open('POST', apiUrl(`/api/admin/sessions/${sessionId}/photos`));
     xhr.setRequestHeader('authorization', `Bearer ${getToken()}`);
     xhr.timeout = 120000;
-    xhr.ontimeout = () => reject(new Error('Upload timed out. Please try again.'));
+    const failRetryable = (message) => reject(Object.assign(new Error(message), { retryable: true }));
+    xhr.ontimeout = () => failRetryable('Upload timed out.');
     xhr.onabort = () => reject(new Error('Upload cancelled.'));
     xhr.upload.onprogress = (ev) => {
       if (!ev.lengthComputable) return;
@@ -310,22 +365,50 @@ async function uploadPhotoBatch(sessionId, items, onProgress) {
       } else {
         let detail = `HTTP ${xhr.status}`;
         try { detail = JSON.parse(xhr.responseText).error || detail; } catch { /* Non-JSON gateway response. */ }
-        reject(new Error(detail));
+        // 5xx and gateway responses are usually transient (the Worker was overloaded); 4xx are not.
+        reject(Object.assign(new Error(detail), { retryable: xhr.status >= 500 }));
       }
     };
-    xhr.onerror = () => reject(new Error('Network error.'));
+    xhr.onerror = () => failRetryable('Network error.');
     xhr.send(form);
   });
 
+  // Retry transient failures (network drop / timeout / overloaded Worker) a couple of times.
+  const uploadWithRetry = async (item, index) => {
+    for (let attempt = 1; ; attempt += 1) {
+      try { return await uploadOne(item, await watermarkedPreview(item.file), index); }
+      catch (error) {
+        if (!error.retryable || attempt >= UPLOAD_MAX_ATTEMPTS) throw error;
+        await new Promise(resolve => setTimeout(resolve, 700 * attempt));
+      }
+    }
+  };
+
+  // The Worker buffers each original in memory, so cap the bytes in flight (not just the
+  // request count) to stay well under its limit; a file larger than the budget uploads alone.
+  let inFlightBytes = 0; const waiters = [];
+  const acquire = (bytes) => (inFlightBytes === 0 || inFlightBytes + bytes <= UPLOAD_BYTE_BUDGET)
+    ? (inFlightBytes += bytes, Promise.resolve())
+    : new Promise(resolve => waiters.push({ bytes, resolve }));
+  const release = (bytes) => {
+    inFlightBytes -= bytes;
+    for (let i = 0; i < waiters.length; ) {
+      if (inFlightBytes === 0 || inFlightBytes + waiters[i].bytes <= UPLOAD_BYTE_BUDGET) { inFlightBytes += waiters[i].bytes; waiters.splice(i, 1)[0].resolve(); }
+      else i += 1;
+    }
+  };
+
   onProgress(0, 0, 'calculating...');
-  // Wait for every in-flight upload before reporting failure. Limit memory use.
   const queue = items.map((item, index) => ({ item, index }));
   const results = []; const failures = [];
-  await Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => {
+  await Promise.all(Array.from({ length: Math.min(UPLOAD_MAX_WORKERS, queue.length) }, async () => {
     while (queue.length) {
       const { item, index } = queue.shift();
-      try { results.push(await uploadOne(item, await watermarkedPreview(item.file), index)); }
-      catch (error) { failures.push(`${item.file.name}: ${error.message}`); }
+      await acquire(item.file.size);
+      onItem(index, 'uploading');
+      try { const result = await uploadWithRetry(item, index); results.push(result); onItem(index, 'done', result); }
+      catch (error) { failures.push({ item, message: `${item.file.name}: ${error.message}` }); onItem(index, 'failed', error); }
+      finally { release(item.file.size); }
     }
   }));
   return { results, failures };
@@ -339,10 +422,12 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
   if (!adminFiles.length) return setStatus('Choose at least one photo before publishing.', true);
 
   const publishBtn = document.getElementById('publishBtn');
+  const queueEl = document.getElementById('fileQueue');
+  const rows = [...queueEl.querySelectorAll('.photo-row')];
   uploadBusy = true;
   document.querySelectorAll('#uploadForm input, #uploadForm button').forEach(control => { control.disabled = true; });
   signOutBtn.disabled = true;
-  renderFileList();
+  queueEl.dataset.uploading = 'true';
   publishBtn.disabled = true;
   publishBtn.innerHTML = 'Publishing…';
   hideProgress();
@@ -360,17 +445,24 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
 
     const sessionId = create.session.id;
     setStatus(`Uploading ${adminFiles.length} photo${adminFiles.length === 1 ? '' : 's'}…`);
-    const { failures } = await uploadPhotoBatch(sessionId, adminFiles.map(file => ({ file })), setProgress);
-    if (failures.length) throw new Error(`${failures.length} upload(s) failed. The draft is still private; open Sessions to review uploaded photos. ${failures[0]}`);
+    const { results, failures } = await uploadPhotoBatch(sessionId, adminFiles.map(file => ({ file })), setProgress, (index, state, detail) => markRowFromResult(rows[index], state, detail));
+    if (!results.length) throw new Error(`All ${failures.length} upload(s) failed. The draft is still private; open Sessions to review or delete it. ${failures[0].message}`);
 
-    // Mark session published
+    // Publish whatever uploaded successfully; failed files (if any) can be added afterwards via "Upload more".
     await apiRequest(`/api/admin/sessions/${sessionId}/publish`, { method: 'POST' });
+    // Leave the ticked list on screen; "Clear list" or a new selection resets it.
     adminFiles = [];
     photoInput.value = '';
-    if (typeof renderFileList === 'function') renderFileList();
+    queueEl.dataset.finished = 'true';
+    queueEl.querySelector('.file-queue-head strong').textContent = `${results.length} of ${rows.length} photo${rows.length === 1 ? '' : 's'} published`;
+    queueEl.querySelector('.file-queue-head button').textContent = 'Clear list';
     setProgress(100, 0, '');
-    setStatus('Published! Your session is live. Open Sessions to follow photo processing.');
-    
+    if (failures.length) {
+      setStatus(`Published! ${results.length} of ${results.length + failures.length} photos are live. ${failures.length} upload(s) failed — open Sessions → "Upload more" on this session to retry. ${failures[0].message}`, true);
+    } else {
+      setStatus('Published! Your session is live. Open Sessions to follow photo processing.');
+    }
+
     hideProgress();
   } catch (err) {
     setStatus(err.message || 'Upload failed. Your draft session is still private.', true);
@@ -380,7 +472,8 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
     document.querySelectorAll('#uploadForm input, #uploadForm button').forEach(control => { control.disabled = false; });
     signOutBtn.disabled = false;
     publishBtn.innerHTML = 'Publish photo pack <span>→</span>';
-    renderFileList();
+    delete queueEl.dataset.uploading;
+    queueEl.querySelectorAll('button').forEach(control => { control.disabled = false; });
   }
 });
 
@@ -569,7 +662,7 @@ document.getElementById('dashboardGrid').addEventListener('click', async (e) => 
   const moreBtn = e.target.closest('.upload-more-btn');
   if (moreBtn) {
     if (uploadBusy) return notifyCrew('Wait for the current upload to finish before adding more photos.');
-    moreUpload = { sessionId: moreBtn.dataset.sessionId, title: moreBtn.dataset.sessionTitle, items: [], duplicates: [] };
+    moreUpload = { sessionId: moreBtn.dataset.sessionId, title: moreBtn.dataset.sessionTitle, items: [], duplicates: [], failedItems: [] };
     morePhotoInput.click();
     return;
   }
@@ -631,7 +724,8 @@ document.getElementById('refreshBtn').addEventListener('click', () => loadDashbo
 const morePhotoInput = document.getElementById('morePhotoInput');
 const moreConfirmBtn = document.getElementById('moreConfirmBtn');
 const moreCancelBtn  = document.getElementById('moreCancelBtn');
-let moreUpload = null; // { sessionId, title, items: [{ file, name, duplicate }], duplicates }
+const moreRetryBtn   = document.getElementById('moreRetryBtn');
+let moreUpload = null; // { sessionId, title, items: [{ file, name, duplicate }], duplicates, failedItems }
 
 // Mirror the Worker's safeFilename so the duplicate check compares stored names.
 function storedFilename(name) { return (name || 'photo.jpg').replace(/[^a-zA-Z0-9._-]/g, '-').slice(-120); }
@@ -647,9 +741,13 @@ function setMoreProgress(percent, speed, eta) {
   document.getElementById('moreProgressSpeed').textContent = speed ? `${Math.round(speed)} KB/s` : '';
   document.getElementById('moreProgressEta').textContent = eta || '';
 }
+let moreFiles = []; // Files whose thumbnails the dialog list currently shows.
+uploadMoreModal.addEventListener('close', () => { releaseThumbnails(moreFiles); moreFiles = []; });
 function resetMoreModal() {
   document.getElementById('moreSummary').textContent = 'Checking your selection…';
-  document.getElementById('moreDuplicates').hidden = true;
+  document.getElementById('morePhotos').hidden = true;
+  document.getElementById('morePhotoList').replaceChildren();
+  releaseThumbnails(moreFiles); moreFiles = [];
   document.getElementById('moreChoice').hidden = true;
   document.querySelector('input[name=duplicateMode][value=skip]').checked = true;
   document.getElementById('moreProgressWrap').classList.add('hidden');
@@ -657,6 +755,8 @@ function resetMoreModal() {
   setMoreStatus('');
   moreConfirmBtn.disabled = true; moreConfirmBtn.innerHTML = 'Upload photos <span>→</span>';
   moreCancelBtn.textContent = 'Cancel';
+  moreRetryBtn.hidden = true;
+  if (moreUpload) moreUpload.failedItems = [];
 }
 
 morePhotoInput.addEventListener('click', (e) => { e.target.value = null; });
@@ -699,13 +799,12 @@ function renderUploadMore(repeated) {
   else summary.append('None of them are in this session yet.');
   if (repeated) summary.append(` ${plural(repeated, 'repeated file')} in your selection ${repeated === 1 ? 'was' : 'were'} dropped.`);
 
-  const panel = document.getElementById('moreDuplicates'); panel.hidden = !duplicates.length;
-  if (duplicates.length) {
-    document.getElementById('moreDuplicatesTitle').textContent = `Already in this session (${duplicates.length})`;
-    const list = document.getElementById('moreDuplicateList'); list.replaceChildren();
-    duplicates.slice(0, 40).forEach(item => { const row = document.createElement('li'); row.textContent = item.name; list.append(row); });
-    if (duplicates.length > 40) { const row = document.createElement('li'); row.textContent = `… and ${duplicates.length - 40} more`; list.append(row); }
-  }
+  // Every selected photo gets a row up front; the rows then show live upload progress.
+  document.getElementById('morePhotosTitle').textContent = duplicates.length ? `Selected photos · ${duplicates.length} already in this session` : 'Selected photos';
+  const list = document.getElementById('morePhotoList'); list.replaceChildren();
+  items.forEach(item => { item.row = photoRow(item.file, { tag: item.duplicate ? 'Already in session' : '' }); list.append(item.row); });
+  moreFiles = items.map(item => item.file);
+  document.getElementById('morePhotos').hidden = false;
   document.getElementById('moreChoice').hidden = !duplicates.length;
   moreConfirmBtn.disabled = false;
   updateMoreConfirmLabel();
@@ -715,34 +814,37 @@ function plannedUploads() {
   if (!moreUpload) return [];
   const mode = moreUpload.duplicates.length ? document.querySelector('input[name=duplicateMode]:checked')?.value : '';
   const items = mode === 'skip' ? moreUpload.items.filter(item => !item.duplicate) : moreUpload.items;
-  return items.map(item => ({ file: item.file, onDuplicate: mode || undefined }));
+  return items.map(item => ({ file: item.file, onDuplicate: mode || undefined, row: item.row }));
 }
 function updateMoreConfirmLabel() {
   const count = plannedUploads().length;
   moreConfirmBtn.innerHTML = count ? `Upload ${plural(count, 'photo')} <span>→</span>` : 'Nothing to upload';
   moreConfirmBtn.disabled = !count;
+  // Preview the choice: duplicates dim when they are about to be left out.
+  const skipping = document.querySelector('input[name=duplicateMode]:checked')?.value === 'skip';
+  moreUpload?.duplicates.forEach(item => setRowState(item.row, skipping ? 'skipped' : 'waiting'));
 }
 document.getElementById('moreChoice').addEventListener('change', updateMoreConfirmLabel);
 
-moreConfirmBtn.addEventListener('click', async () => {
-  const items = plannedUploads();
-  if (!items.length || uploadBusy) return;
+async function runMoreUpload(items, { skippedByChoice = 0, isRetry = false } = {}) {
   const controls = uploadMoreModal.querySelectorAll('input, button');
   uploadBusy = true; controls.forEach(control => { control.disabled = true; }); signOutBtn.disabled = true;
   moreConfirmBtn.innerHTML = 'Uploading…';
-  setMoreStatus(`Uploading ${plural(items.length, 'photo')}…`);
+  if (isRetry) moreRetryBtn.textContent = 'Retrying…';
+  setMoreStatus(`${isRetry ? 'Retrying' : 'Uploading'} ${plural(items.length, 'photo')}…`);
   try {
-    const { results, failures } = await uploadPhotoBatch(moreUpload.sessionId, items, setMoreProgress);
+    const { results, failures } = await uploadPhotoBatch(moreUpload.sessionId, items, setMoreProgress, (index, state, detail) => markRowFromResult(items[index].row, state, detail));
     const uploaded = results.filter(result => !result.skipped);
     const replaced = uploaded.reduce((sum, result) => sum + (result.replaced || 0), 0);
     const renamed = uploaded.filter(result => result.duplicate === 'renamed');
-    const skipped = results.filter(result => result.skipped).length + (moreUpload.items.length - items.length);
+    const skipped = results.filter(result => result.skipped).length + skippedByChoice;
     const parts = [`${plural(uploaded.length, 'photo')} uploaded and queued for face indexing.`];
     if (replaced) parts.push(`${plural(replaced, 'existing photo')} replaced.`);
     if (renamed.length) parts.push(`${renamed.length === 1 ? '1 copy' : `${renamed.length} copies`} saved as ${renamed.slice(0, 3).map(result => result.filename).join(', ')}${renamed.length > 3 ? '…' : ''}.`);
     if (skipped) parts.push(`${plural(skipped, 'duplicate')} skipped.`);
-    if (failures.length) parts.push(`${plural(failures.length, 'upload')} failed — ${failures[0]}`);
+    if (failures.length) parts.push(`${plural(failures.length, 'upload')} failed — ${failures[0].message}`);
     setMoreStatus(parts.join(' '), Boolean(failures.length));
+    moreUpload.failedItems = failures.map(failure => failure.item);
     if (!failures.length) document.getElementById('moreProgressWrap').classList.add('hidden');
     moreUpload.items = []; moreUpload.duplicates = [];
     loadDashboard(true);
@@ -754,8 +856,25 @@ moreConfirmBtn.addEventListener('click', async () => {
     moreConfirmBtn.disabled = true; moreConfirmBtn.innerHTML = 'Upload photos <span>→</span>';
     moreCancelBtn.textContent = 'Done';
     document.getElementById('moreChoice').hidden = true;
-    document.getElementById('moreDuplicates').hidden = true;
+    if (moreUpload.failedItems.length) {
+      moreRetryBtn.hidden = false; moreRetryBtn.disabled = false;
+      moreRetryBtn.textContent = `Retry ${plural(moreUpload.failedItems.length, 'failed upload')}`;
+    } else {
+      moreRetryBtn.hidden = true;
+    }
   }
+}
+
+moreConfirmBtn.addEventListener('click', () => {
+  const items = plannedUploads();
+  if (!items.length || uploadBusy) return;
+  runMoreUpload(items, { skippedByChoice: moreUpload.items.length - items.length });
+});
+
+moreRetryBtn.addEventListener('click', () => {
+  const items = moreUpload?.failedItems || [];
+  if (!items.length || uploadBusy) return;
+  runMoreUpload(items, { isRetry: true });
 });
 
 // ── Crew Match Verification Queue ─────────────────────────────────────────────
@@ -909,6 +1028,109 @@ if (rescanVerifyBtn) {
 const refreshVerifyBtn = document.getElementById('refreshVerifyBtn');
 if (refreshVerifyBtn) {
   refreshVerifyBtn.addEventListener('click', () => loadVerifyQueue());
+}
+
+// ── Burst & Appearance Fallback Link Review ────────────────────────────────────
+// Unlike face pairs above, one or both sides here may have no detected face at all, so there is
+// no bbox to crop to — cards compare whole photos. Plain lazy-loaded <img> is enough; there is no
+// canvas cropping/zoom to justify the decoded-image cache the face-pair review uses.
+
+const LINK_TYPE_LABEL = { burst: ['BURST SEQUENCE', 'Shot moments apart'], appearance: ['SIMILAR OUTFIT', 'Matching clothing colors'] };
+let linkQueueVersion = 0;
+async function loadLinkQueue() {
+  const grid = document.getElementById('linkGrid');
+  if (!grid) return;
+  const version = ++linkQueueVersion;
+  grid.innerHTML = '<p class="loading-msg review-queue-loading" role="status"><span class="review-spinner" aria-hidden="true"></span>Looking for burst and appearance links…</p>';
+  try {
+    const { queue, stats, trainedOn } = await apiRequest('/api/admin/link-queue');
+    if (version !== linkQueueVersion) return;
+    document.getElementById('linkPending').textContent = stats.pending || 0;
+    document.getElementById('linkConfirmed').textContent = stats.confirmed || 0;
+    document.getElementById('linkRejected').textContent = stats.rejected || 0;
+    showRetrainStatus(trainedOn);
+    if (!queue?.length) { grid.innerHTML = '<p class="empty-msg">No burst or appearance links available. Photos need capture timestamps — re-index a session, then scan again.</p>'; return; }
+    grid.innerHTML = queue.map(item => {
+      const [eyebrow, note] = LINK_TYPE_LABEL[item.linkType] || LINK_TYPE_LABEL.burst;
+      return `
+      <article class="verify-card" id="link-card-${escHtml(item.id)}">
+        <div class="review-heading"><div><span class="eyebrow">${eyebrow}</span><h3>Same person, different shot?</h3><p>${escHtml(item.sessionTitle)}</p></div><span class="review-score">${item.scorePct}% confidence<small>${note}</small></span></div>
+        <div class="verify-faces">${[item.photo1, item.photo2].map((photo, index) => `
+          <figure class="review-face"><figcaption>PHOTO ${index === 0 ? 'A' : 'B'}</figcaption><img class="link-photo-img" loading="lazy" src="${escHtml(photo.url)}" alt="Photo ${index === 0 ? 'A' : 'B'} for comparison"><p title="${escHtml(photo.filename)}">${escHtml(photo.filename)}</p></figure>`).join('')}</div>
+        <div class="verify-actions"><button class="confirm-btn" data-link-id="${escHtml(item.id)}" data-action="confirm">✓ Same person</button><button class="reject-btn" data-link-id="${escHtml(item.id)}" data-action="reject">✕ Different people</button><button class="review-skip" data-link-id="${escHtml(item.id)}" data-action="skip">Not sure · skip</button></div>
+      </article>`;
+    }).join('');
+    grid.querySelectorAll('.link-photo-img').forEach(img => {
+      img.addEventListener('error', () => img.closest('.review-face').classList.add('link-photo-error'), { once: true });
+    });
+  } catch (error) { if (version === linkQueueVersion) grid.innerHTML = `<p class="loading-msg error-msg">${escHtml(error.message)}</p>`; }
+}
+const linkGrid = document.getElementById('linkGrid');
+if (linkGrid) {
+  linkGrid.addEventListener('click', async event => {
+    const button = event.target.closest('button[data-action]'); if (!button) return;
+    const card = button.closest('.verify-card');
+    if (button.dataset.action === 'skip') {
+      card.remove(); if (!linkGrid.querySelector('.verify-card')) linkGrid.innerHTML = '<p class="empty-msg">No more links in this batch. Refresh to return to skipped links.</p>';
+      return;
+    }
+    card.querySelectorAll('button').forEach(control => { control.disabled = true; });
+    const confirmed = button.dataset.action === 'confirm';
+    try {
+      await apiRequest('/api/admin/confirm-link', { method: 'POST', body: JSON.stringify({ linkId: button.dataset.linkId, confirmed }) });
+      card.remove();
+      const pending = document.getElementById('linkPending'); pending.textContent = Math.max(0, Number(pending.textContent) - 1);
+      const count = document.getElementById(confirmed ? 'linkConfirmed' : 'linkRejected'); count.textContent = Number(count.textContent) + 1;
+      if (!linkGrid.querySelector('.verify-card')) await loadLinkQueue();
+    } catch (error) { notifyCrew(error.message); card.querySelectorAll('button').forEach(control => { control.disabled = false; }); }
+  });
+}
+
+const rescanLinkBtn = document.getElementById('rescanLinkBtn');
+if (rescanLinkBtn) {
+  rescanLinkBtn.addEventListener('click', async () => {
+    rescanLinkBtn.disabled = true;
+    rescanLinkBtn.textContent = 'Scanning...';
+    try {
+      const res = await apiRequest('/api/admin/link-queue/scan', { method: 'POST' });
+      notifyCrew(`✓ Scan complete! Found ${res.generated || 0} candidate link(s) for verification.`);
+      loadLinkQueue();
+    } catch (err) {
+      notifyCrew(err.message);
+    } finally {
+      rescanLinkBtn.disabled = false;
+      rescanLinkBtn.textContent = '🔍 Scan Burst & Appearance Links';
+    }
+  });
+}
+
+const refreshLinkBtn = document.getElementById('refreshLinkBtn');
+if (refreshLinkBtn) {
+  refreshLinkBtn.addEventListener('click', () => loadLinkQueue());
+}
+
+function showRetrainStatus(trainedOn) {
+  const el = document.getElementById('retrainStatus');
+  if (!el) return;
+  el.hidden = !trainedOn;
+  el.textContent = trainedOn ? `Fallback-match scoring trained on ${trainedOn} review${trainedOn === 1 ? '' : 's'}` : '';
+}
+const retrainBtn = document.getElementById('retrainBtn');
+if (retrainBtn) {
+  retrainBtn.addEventListener('click', async () => {
+    retrainBtn.disabled = true;
+    retrainBtn.textContent = 'Retraining...';
+    try {
+      const res = await apiRequest('/api/admin/retrain', { method: 'POST' });
+      if (res.trained) { notifyCrew(`✓ Fallback-match scoring retrained on ${res.reviewCount} reviews.`); showRetrainStatus(res.reviewCount); }
+      else notifyCrew(`Not enough reviewed pairs yet (${res.reviewCount} so far) — keep reviewing the queues above, then retrain again.`);
+    } catch (err) {
+      notifyCrew(err.message);
+    } finally {
+      retrainBtn.disabled = false;
+      retrainBtn.textContent = '🧠 Retrain from Reviews';
+    }
+  });
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
