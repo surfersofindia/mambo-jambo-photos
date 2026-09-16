@@ -321,8 +321,13 @@ dropZone.addEventListener('drop', (e) => selectFiles(e.dataTransfer.files));
 // Keep concurrent uploads under a memory budget: the Worker buffers each original fully,
 // so several large files at once can exceed its limit and drop connections.
 const UPLOAD_MAX_WORKERS = 3;
-const UPLOAD_BYTE_BUDGET = 20 * 1024 * 1024; // ~20 MB of originals in flight at once
+const UPLOAD_BYTE_BUDGET = 20 * 1024 * 1024; // ~20 MB of originals in flight at once (buffering server)
 const UPLOAD_MAX_ATTEMPTS = 3;
+// When the Worker streams uploads straight to storage it no longer holds whole files in
+// memory, so many can run at once. Turn this on ONLY once that Worker path is deployed —
+// against an old (buffering) Worker the streaming request format fails.
+const UPLOAD_STREAMING = false;
+const UPLOAD_STREAM_WORKERS = 12;
 
 // Send originals plus watermarked previews and report combined progress.
 // Each item is { file, onDuplicate? }. onItem(index, state, detail) fires as each photo starts and finishes.
@@ -340,14 +345,26 @@ async function uploadPhotoBatch(sessionId, items, onProgress, onItem = () => {})
   };
 
   const uploadOne = (item, preview, index) => new Promise((resolve, reject) => {
-    const form = new FormData();
-    form.append('file', item.file);
-    form.append('preview', preview, `${item.file.name.replace(/\.[^.]+$/, '')}-preview.jpg`);
-    if (item.onDuplicate) form.append('onDuplicate', item.onDuplicate);
-
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', apiUrl(`/api/admin/sessions/${sessionId}/photos`));
-    xhr.setRequestHeader('authorization', `Bearer ${getToken()}`);
+    let body;
+    if (UPLOAD_STREAMING) {
+      // Body: [uint32 preview length LE][preview][original]; metadata rides in the query string.
+      const header = new Uint8Array(4); new DataView(header.buffer).setUint32(0, preview.size, true);
+      body = new Blob([header, preview, item.file]);
+      const params = new URLSearchParams({ type: item.file.type, filename: item.file.name });
+      if (item.onDuplicate) params.set('onDuplicate', item.onDuplicate);
+      xhr.open('POST', apiUrl(`/api/admin/sessions/${sessionId}/photos?${params}`));
+      xhr.setRequestHeader('authorization', `Bearer ${getToken()}`);
+      xhr.setRequestHeader('content-type', 'application/octet-stream');
+    } else {
+      const form = new FormData();
+      form.append('file', item.file);
+      form.append('preview', preview, `${item.file.name.replace(/\.[^.]+$/, '')}-preview.jpg`);
+      if (item.onDuplicate) form.append('onDuplicate', item.onDuplicate);
+      body = form;
+      xhr.open('POST', apiUrl(`/api/admin/sessions/${sessionId}/photos`));
+      xhr.setRequestHeader('authorization', `Bearer ${getToken()}`);
+    }
     xhr.timeout = 120000;
     const failRetryable = (message) => reject(Object.assign(new Error(message), { retryable: true }));
     xhr.ontimeout = () => failRetryable('Upload timed out.');
@@ -370,7 +387,7 @@ async function uploadPhotoBatch(sessionId, items, onProgress, onItem = () => {})
       }
     };
     xhr.onerror = () => failRetryable('Network error.');
-    xhr.send(form);
+    xhr.send(body);
   });
 
   // Retry transient failures (network drop / timeout / overloaded Worker) a couple of times.
@@ -384,16 +401,19 @@ async function uploadPhotoBatch(sessionId, items, onProgress, onItem = () => {})
     }
   };
 
-  // The Worker buffers each original in memory, so cap the bytes in flight (not just the
-  // request count) to stay well under its limit; a file larger than the budget uploads alone.
+  // A buffering Worker holds each original in memory, so cap the bytes in flight (not just the
+  // request count) to stay under its limit; a file larger than the budget uploads alone. A
+  // streaming Worker doesn't buffer, so we lift the byte cap and just run many at once.
+  const byteBudget = UPLOAD_STREAMING ? Infinity : UPLOAD_BYTE_BUDGET;
+  const workerCount = UPLOAD_STREAMING ? UPLOAD_STREAM_WORKERS : UPLOAD_MAX_WORKERS;
   let inFlightBytes = 0; const waiters = [];
-  const acquire = (bytes) => (inFlightBytes === 0 || inFlightBytes + bytes <= UPLOAD_BYTE_BUDGET)
+  const acquire = (bytes) => (inFlightBytes === 0 || inFlightBytes + bytes <= byteBudget)
     ? (inFlightBytes += bytes, Promise.resolve())
     : new Promise(resolve => waiters.push({ bytes, resolve }));
   const release = (bytes) => {
     inFlightBytes -= bytes;
     for (let i = 0; i < waiters.length; ) {
-      if (inFlightBytes === 0 || inFlightBytes + waiters[i].bytes <= UPLOAD_BYTE_BUDGET) { inFlightBytes += waiters[i].bytes; waiters.splice(i, 1)[0].resolve(); }
+      if (inFlightBytes === 0 || inFlightBytes + waiters[i].bytes <= byteBudget) { inFlightBytes += waiters[i].bytes; waiters.splice(i, 1)[0].resolve(); }
       else i += 1;
     }
   };
@@ -401,7 +421,7 @@ async function uploadPhotoBatch(sessionId, items, onProgress, onItem = () => {})
   onProgress(0, 0, 'calculating...');
   const queue = items.map((item, index) => ({ item, index }));
   const results = []; const failures = [];
-  await Promise.all(Array.from({ length: Math.min(UPLOAD_MAX_WORKERS, queue.length) }, async () => {
+  await Promise.all(Array.from({ length: Math.min(workerCount, queue.length) }, async () => {
     while (queue.length) {
       const { item, index } = queue.shift();
       await acquire(item.file.size);

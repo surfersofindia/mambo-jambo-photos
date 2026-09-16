@@ -104,7 +104,7 @@ test('matching returns deduplicated signed previews, persists IDs only, and prot
   const { env, searches, mediaReads } = matchingEnv();
   context.mock.method(globalThis, 'fetch', async (url, options) => {
     assert.equal(url, env.FACE_API_URL); assert.equal(options.body.get('file').name, 'image.jpg');
-    return Response.json([{ embedding: [1, 0] }]);
+    return Response.json({ faces: [{ embedding: [1, 0] }] });
   });
   const result = await worker.fetch(request('/api/match', { method: 'POST', body: selfieForm(true) }), env, {});
   assert.equal(result.status, 200);
@@ -121,7 +121,7 @@ test('matching returns deduplicated signed previews, persists IDs only, and prot
 });
 test('multiple faces produce a retryable error without creating a search', async context => {
   const { env, searches } = matchingEnv();
-  context.mock.method(globalThis, 'fetch', async () => Response.json([{ embedding: [1, 0] }, { embedding: [0, 1] }]));
+  context.mock.method(globalThis, 'fetch', async () => Response.json({ faces: [{ embedding: [1, 0] }, { embedding: [0, 1] }] }));
   const result = await worker.fetch(request('/api/match', { method: 'POST', body: selfieForm(true) }), env, {});
   assert.equal(result.status, 400); assert.match((await result.json()).error, /only one/); assert.equal(searches.length, 0);
 });
@@ -141,7 +141,7 @@ test('browser-style mixed-case multipart boundaries preserve selfie fields', asy
 });
 async function getMatch(context) {
   const { env } = matchingEnv();
-  context.mock.method(globalThis, 'fetch', async () => Response.json([{ embedding: [1, 0] }]));
+  context.mock.method(globalThis, 'fetch', async () => Response.json({ faces: [{ embedding: [1, 0] }] }));
   const result = await worker.fetch(request('/api/match', { method: 'POST', body: selfieForm(true) }), env, {});
   return result.json();
 }
@@ -205,17 +205,17 @@ test('payment verification confirms order status with Cashfree before unlocking'
   assert.equal(result.status, 402);
 });
 test('webhook rejects an invalid signature without touching the database', async () => {
-  const env = { CASHFREE_WEBHOOK_SECRET: 'whsec', DB: { prepare: () => { throw new Error('DB should not be queried'); } } };
+  const env = { CASHFREE_SECRET_KEY: 'test-secret', DB: { prepare: () => { throw new Error('DB should not be queried'); } } };
   const result = await worker.fetch(request('/api/payment/webhook', { method: 'POST', headers: { 'x-webhook-signature': 'bad', 'x-webhook-timestamp': '123' }, body: '{}' }), env, {});
   assert.equal(result.status, 401);
 });
 test('a validly signed webhook marks the payment captured and the search paid', async () => {
-  const secret = 'whsec';
+  const secret = 'test-secret';
   const timestamp = String(Date.now());
   const payload = JSON.stringify({ type: 'PAYMENT_SUCCESS_WEBHOOK', data: { order: { order_id: 'mj-test-order' }, payment: { cf_payment_id: 555 } } });
   const signature = createHmac('sha256', secret).update(`${timestamp}${payload}`).digest('base64');
   const updates = [];
-  const env = { CASHFREE_WEBHOOK_SECRET: secret, DB: { prepare(sql) { return { bind(...values) { this.values = values; return this; },
+  const env = { CASHFREE_SECRET_KEY: secret, DB: { prepare(sql) { return { bind(...values) { this.values = values; return this; },
     async run() { updates.push(sql); return {}; },
     async first() { if (sql.includes('SELECT search_id FROM payments')) return { search_id: 'search-1' }; throw new Error(`Unexpected query: ${sql}`); },
   }; } } };
@@ -309,4 +309,52 @@ test('uploads without a duplicate mode keep the previous behaviour', async () =>
   const result = await worker.fetch(photoUpload(token, 'session-1', 'IMG_0412.jpg'), env, {});
   assert.equal(result.status, 201); assert.equal((await result.json()).duplicate, null);
   assert.equal(inserts.length, 1); assert.equal(deletes.length, 0);
+});
+// ── Streaming upload (framed body: [uint32 preview length LE][preview][original]) ──
+// FixedLengthStream is a Workers runtime global; shim it for Node as a pass-through.
+globalThis.FixedLengthStream ??= class { constructor() { const s = new TransformStream(); this.writable = s.writable; this.readable = s.readable; } };
+function framedBody(preview, original) {
+  const len = new Uint8Array(4); new DataView(len.buffer).setUint32(0, preview.length, true);
+  return new Blob([len, preview, original]);
+}
+const JPEG = extra => new Uint8Array([0xFF, 0xD8, ...extra]); // valid JPEG SOI prefix
+test('streaming upload pipes the original to R2 and stores the buffered preview', async () => {
+  const token = await login();
+  const { env, puts, inserts, queued } = uploadEnv({ status: 'published', existing: [] });
+  const stored = {};
+  env.PHOTOS.put = async (key, value) => { puts.push(key); stored[key] = value instanceof ReadableStream ? new Uint8Array(await new Response(value).arrayBuffer()) : value; };
+  const original = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+  const streamBody = framedBody(JPEG([9, 9, 9]), original);
+  const req = request('/api/admin/sessions/session-1/photos?type=image%2Fjpeg&filename=DSC01237.JPG', {
+    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream', 'content-length': String(streamBody.size) }, body: streamBody,
+  });
+  const result = await worker.fetch(req, env, {});
+  assert.equal(result.status, 201);
+  const body = await result.json();
+  assert.equal(body.filename, 'DSC01237.JPG'); assert.equal(body.duplicate, null);
+  assert.equal(inserts.length, 1); assert.equal(queued.length, 1); assert.equal(puts.length, 2);
+  const originalKey = puts.find(k => k.includes('/original/'));
+  assert.deepEqual([...stored[originalKey]], [1, 2, 3, 4, 5, 6, 7, 8]); // original streamed through intact
+  const previewKey = puts.find(k => k.includes('/preview/'));
+  assert.deepEqual([...stored[previewKey]], [0xFF, 0xD8, 9, 9, 9]); // preview buffered intact
+});
+test('streaming upload honours the skip duplicate mode without storing anything', async () => {
+  const token = await login();
+  const { env, puts, inserts } = uploadEnv(); // existing IMG_0412.jpg
+  const skipBody = framedBody(JPEG([1]), new Uint8Array([1, 2, 3]));
+  const req = request('/api/admin/sessions/session-1/photos?type=image%2Fjpeg&filename=IMG_0412.jpg&onDuplicate=skip', {
+    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream', 'content-length': String(skipBody.size) }, body: skipBody,
+  });
+  const result = await worker.fetch(req, env, {});
+  assert.equal(result.status, 200); assert.equal((await result.json()).skipped, true);
+  assert.equal(puts.length, 0); assert.equal(inserts.length, 0);
+});
+test('streaming upload rejects a preview that is not a JPEG', async () => {
+  const token = await login();
+  const { env } = uploadEnv({ existing: [] });
+  const badBody = framedBody(new Uint8Array([0x00, 0x01, 0x02]), new Uint8Array([9]));
+  const req = request('/api/admin/sessions/session-1/photos?type=image%2Fjpeg&filename=x.jpg', {
+    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream', 'content-length': String(badBody.size) }, body: badBody,
+  });
+  assert.equal((await worker.fetch(req, env, {})).status, 400);
 });

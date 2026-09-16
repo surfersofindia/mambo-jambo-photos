@@ -2,8 +2,8 @@
  * Mambo Jambo photo API — Cloudflare Worker + D1 + R2.
  *
  * Secrets set with `wrangler secret put`:
- *   ADMIN_PASSWORD, SESSION_SECRET, CASHFREE_APP_ID, CASHFREE_SECRET_KEY,
- *   CASHFREE_WEBHOOK_SECRET
+ *   ADMIN_PASSWORD, SESSION_SECRET, CASHFREE_APP_ID, CASHFREE_SECRET_KEY
+ * (Cashfree signs webhooks with the same CASHFREE_SECRET_KEY, not a separate secret.)
  * Vars: CASHFREE_ENV ('sandbox' or 'production', defaults to 'sandbox')
  */
 
@@ -53,6 +53,70 @@ async function readForm(request, maxBytes) {
   // Blob.type lowercases MIME parameters; multipart boundaries are case-sensitive.
   try { return await new Response(body, { headers: { 'content-type': request.headers.get('content-type') || '' } }).formData(); }
   catch { throw new RequestError('Choose a valid image upload.'); }
+}
+
+// Streaming upload body layout: [uint32 preview length LE][preview JPEG bytes][original bytes].
+// The small preview is buffered; the large original is piped straight to R2 so a
+// batch of big photos never stacks up in the isolate's memory (which dropped connections).
+async function readFramedUpload(request, maxPreview) {
+  if (!request.body) throw new RequestError('A request body is required.');
+  const reader = request.body.getReader();
+  let buf = new Uint8Array(0); let ended = false;
+  const pull = async () => {
+    const r = await reader.read();
+    if (r.done) { ended = true; return; }
+    const merged = new Uint8Array(buf.length + r.value.length); merged.set(buf); merged.set(r.value, buf.length); buf = merged;
+  };
+  while (buf.length < 4 && !ended) await pull();
+  if (buf.length < 4) throw new RequestError('The upload is incomplete.', 400);
+  const previewLen = new DataView(buf.buffer, buf.byteOffset, buf.length).getUint32(0, true);
+  if (!previewLen || previewLen > maxPreview) { await reader.cancel(); throw new RequestError('The upload preview is invalid.', 400); }
+  while (buf.length < 4 + previewLen && !ended) await pull();
+  if (buf.length < 4 + previewLen) throw new RequestError('The upload is incomplete.', 400);
+  const preview = buf.slice(4, 4 + previewLen);
+  if (preview[0] !== 0xFF || preview[1] !== 0xD8) throw new RequestError('The upload preview is invalid.', 400);
+  const leftover = buf.slice(4 + previewLen);
+  // R2.put only accepts a stream of known length, so pump the original (already-read leftover
+  // plus the rest of the request) through the readable half of a FixedLengthStream.
+  const originalLength = Number(request.headers.get('content-length')) - 4 - previewLen;
+  if (!Number.isFinite(originalLength) || originalLength < 0) throw new RequestError('The upload is incomplete.', 400);
+  const passthrough = new FixedLengthStream(originalLength);
+  (async () => {
+    const writer = passthrough.writable.getWriter();
+    try {
+      if (leftover.length) await writer.write(leftover);
+      while (true) { const r = await reader.read(); if (r.done) break; await writer.write(r.value); }
+      await writer.close();
+    } catch (streamError) { await writer.abort(streamError).catch(() => {}); }
+  })();
+  return { preview, original: passthrough.readable };
+}
+
+// Shared finalize step for both the legacy multipart upload and the streaming upload:
+// resolve the filename against duplicates, store both objects, insert the row, clean up
+// a replaced photo, and enqueue indexing. `original` may be a File or a ReadableStream.
+async function storeSessionPhoto(env, request, sessionId, { filename, contentType, original, preview, onDuplicate }) {
+  let name = safeFilename(filename); let duplicates = [];
+  if (onDuplicate) {
+    duplicates = (await env.DB.prepare('SELECT id, object_key, preview_key FROM photos WHERE session_id = ? AND filename = ? COLLATE NOCASE').bind(sessionId, name).all()).results;
+    if (duplicates.length && onDuplicate === 'skip') return response({ skipped: true, filename: name }, request, env);
+    if (duplicates.length && onDuplicate === 'rename') {
+      const taken = new Set((await env.DB.prepare('SELECT filename FROM photos WHERE session_id = ?').bind(sessionId).all()).results.map(row => row.filename.toLowerCase()));
+      name = uniqueFilename(name, taken);
+    }
+  }
+  const photoId = id(); const objectKey = `sessions/${sessionId}/original/${photoId}-${name}`; const previewKey = `sessions/${sessionId}/preview/${photoId}.jpg`;
+  // Store the streamed original first, then the buffered preview.
+  await env.PHOTOS.put(objectKey, original, { httpMetadata: { contentType } });
+  await env.PHOTOS.put(previewKey, preview, { httpMetadata: { contentType: 'image/jpeg' } });
+  await env.DB.prepare("INSERT INTO photos (id, session_id, object_key, preview_key, filename, content_type, indexing_status) VALUES (?, ?, ?, ?, ?, ?, 'pending')").bind(photoId, sessionId, objectKey, previewKey, name, contentType).run();
+  if (duplicates.length && onDuplicate === 'replace') {
+    // Remove the old rows before their files so a failed delete never leaves a photo pointing at missing media.
+    await env.DB.batch(duplicates.flatMap(photo => [env.DB.prepare('DELETE FROM faces WHERE photo_id = ?').bind(photo.id), env.DB.prepare('DELETE FROM photos WHERE id = ?').bind(photo.id)]));
+    await Promise.all(duplicates.flatMap(photo => [env.PHOTOS.delete(photo.object_key), env.PHOTOS.delete(photo.preview_key)]));
+  }
+  const processing = await enqueuePhotos([{ id: photoId }], env);
+  return response({ photoId, filename: name, status: processing.failed ? 'failed' : 'pending', duplicate: duplicates.length ? (onDuplicate === 'replace' ? 'replaced' : 'renamed') : null, replaced: onDuplicate === 'replace' ? duplicates.length : 0 }, request, env, 201);
 }
 async function readJson(request) {
   const body = await boundedBody(request, 16384);
@@ -138,6 +202,9 @@ function similarity(a, b) {
   for (let i = 0; i < a.length; i += 1) { dot += a[i] * b[i]; aa += a[i] * a[i]; bb += b[i] * b[i]; }
   return dot / (Math.sqrt(aa) * Math.sqrt(bb));
 }
+// Cosine similarity over normalized clothing-color histograms — same shape as similarity() above,
+// separate name because the vectors come from a different signal (appearance, not a face embedding).
+const histogramSimilarity = similarity;
 async function mediaToken(photoId, variant, env) {
   return sign({ scope: 'media', photoId, variant, exp: Date.now() + 20 * 60_000 }, env);
 }
@@ -155,7 +222,7 @@ function cashfreeBase(env) {
   return env.CASHFREE_ENV === 'production' ? 'https://api.cashfree.com/pg' : 'https://sandbox.cashfree.com/pg';
 }
 function cashfreeHeaders(env) {
-  return { 'x-client-id': env.CASHFREE_APP_ID, 'x-client-secret': env.CASHFREE_SECRET_KEY, 'x-api-version': '2023-08-01', 'content-type': 'application/json' };
+  return { 'x-client-id': env.CASHFREE_APP_ID, 'x-client-secret': env.CASHFREE_SECRET_KEY, 'x-api-version': '2025-01-01', 'content-type': 'application/json' };
 }
 async function cashfreeOrder(search, paymentId, customer, siteOrigin, workerOrigin, env) {
   const result = await fetch(`${cashfreeBase(env)}/orders`, {
@@ -166,7 +233,7 @@ async function cashfreeOrder(search, paymentId, customer, siteOrigin, workerOrig
       order_amount: Number((search.price_paise / 100).toFixed(2)),
       order_currency: search.currency,
       customer_details: { customer_id: `guest-${search.id}`, customer_phone: customer.phone, ...(customer.email ? { customer_email: customer.email } : {}) },
-      order_meta: { return_url: `${siteOrigin}/?cfOrder={order_id}`, notify_url: `${workerOrigin}/api/payment/webhook` },
+      order_meta: { return_url: `${siteOrigin}/`, notify_url: `${workerOrigin}/api/payment/webhook` },
     }),
   });
   if (!result.ok) throw new Error('Cashfree could not create an order. Check your live/test keys.');
@@ -185,10 +252,16 @@ async function extractFaces(file, env) {
   try { result = await fetch(env.FACE_API_URL, { method: 'POST', body: form, signal: AbortSignal.timeout(75000) }); }
   catch { throw new RequestError('The face service took too long to respond. Please try again shortly.', 503); }
   if (!result.ok) throw new RequestError('The face service is temporarily unavailable. Please try again shortly.', 503);
-  let faces;
-  try { faces = await result.json(); } catch { throw new RequestError('The face service returned an unreadable result.', 503); }
+  let body;
+  try { body = await result.json(); } catch { throw new RequestError('The face service returned an unreadable result.', 503); }
+  const faces = body?.faces;
   if (!Array.isArray(faces) || faces.some(face => !Array.isArray(face?.embedding) || !face.embedding.length || !face.embedding.every(Number.isFinite) || !face.embedding.some(value => value !== 0))) throw new RequestError('The face service returned an invalid result.', 503);
-  return faces;
+  const capturedAt = typeof body.captured_at === 'string' && Number.isFinite(Date.parse(body.captured_at)) ? body.captured_at : null;
+  const rawAppearance = body.appearance;
+  const appearance = rawAppearance && Array.isArray(rawAppearance.histogram) && rawAppearance.histogram.length && rawAppearance.histogram.every(Number.isFinite)
+    ? { bboxNorm: Array.isArray(rawAppearance.bbox_norm) ? rawAppearance.bbox_norm : null, histogram: rawAppearance.histogram }
+    : null;
+  return { faces, capturedAt, appearance };
 }
 async function enqueuePhotos(photos, env) {
   if (!env.INDEX_QUEUE) throw new RequestError('Photo processing is not configured. Please contact the crew.', 503);
@@ -222,12 +295,14 @@ async function consumePhoto(message, env) {
     await env.DB.prepare("UPDATE indexing_jobs SET status = 'processing', attempts = ?, updated_at = CURRENT_TIMESTAMP WHERE photo_id = ? AND job_id = ?").bind(message.attempts, photoId, jobId).run();
     const object = await env.PHOTOS.get(job.object_key);
     if (!object) throw new RequestError('Original photo is missing. Upload it again.', 404);
-    const faces = await extractFaces(await object.blob(), env);
+    const { faces, capturedAt, appearance } = await extractFaces(await object.blob(), env);
     const statements = [
       env.DB.prepare('DELETE FROM face_verifications WHERE face1_id IN (SELECT id FROM faces WHERE photo_id = ?) OR face2_id IN (SELECT id FROM faces WHERE photo_id = ?)').bind(photoId, photoId),
       env.DB.prepare('DELETE FROM faces WHERE photo_id = ?').bind(photoId),
       ...faces.map(face => env.DB.prepare('INSERT INTO faces (id, photo_id, embedding_json, bbox_json, confidence) VALUES (?, ?, ?, ?, ?)').bind(id(), photoId, JSON.stringify(face.embedding), face.bbox_norm ? JSON.stringify(face.bbox_norm) : null, Number(face.confidence) || null)),
-      env.DB.prepare("UPDATE photos SET indexing_status = 'completed' WHERE id = ?").bind(photoId),
+      env.DB.prepare('DELETE FROM photo_appearances WHERE photo_id = ?').bind(photoId),
+      ...(appearance ? [env.DB.prepare('INSERT INTO photo_appearances (photo_id, bbox_json, histogram_json) VALUES (?, ?, ?)').bind(photoId, appearance.bboxNorm ? JSON.stringify(appearance.bboxNorm) : null, JSON.stringify(appearance.histogram))] : []),
+      env.DB.prepare("UPDATE photos SET indexing_status = 'completed', captured_at = ? WHERE id = ?").bind(capturedAt, photoId),
       env.DB.prepare("UPDATE indexing_jobs SET status = 'completed', error = NULL, updated_at = CURRENT_TIMESTAMP WHERE photo_id = ? AND job_id = ?").bind(photoId, jobId)
     ];
     await env.DB.batch(statements);
@@ -242,6 +317,21 @@ async function consumePhoto(message, env) {
   }
 }
 
+// Groups photos shot within `gapSeconds` of each other (burst-mode continuous shooting is very
+// likely the same subject). photos must be pre-sorted ascending by capturedAt; null/unparsable
+// timestamps are skipped rather than breaking up the surrounding sequence. Single-photo groups
+// (no actual burst) are dropped.
+function burstGroups(photos, gapSeconds = 2) {
+  const groups = [];
+  let current = null;
+  for (const { id: photoId, capturedAt } of photos) {
+    const t = Date.parse(capturedAt);
+    if (!Number.isFinite(t)) continue;
+    if (current && (t - current.lastTime) / 1000 <= gapSeconds) { current.ids.push(photoId); current.lastTime = t; }
+    else { current = { ids: [photoId], lastTime: t }; groups.push(current); }
+  }
+  return groups.filter(group => group.ids.length > 1);
+}
 function faceBounds(raw) {
   let box; try { box = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return null; }
   return Array.isArray(box) && box.length === 4 && box.every(Number.isFinite) && box[0] >= 0 && box[1] >= 0 && box[2] > 0 && box[3] > 0 && box[0] + box[3] <= 100.1 && box[1] + box[2] <= 100.1 ? box : null;
@@ -274,6 +364,139 @@ async function generateBorderlineMatches(env, targetSessionId = null) {
   const results = await env.DB.batch(statements);
   return results.reduce((sum, result) => sum + Number(result.meta?.changes || 0), 0);
 }
+
+// Small hand-rolled logistic regression (gradient descent) — there is no ML library available in a
+// Cloudflare Worker, and with 3 features and at most a few hundred labeled reviews, this trains in
+// well under a millisecond. A null feature value on a row contributes 0 to that row's gradient, so
+// signal types that never co-occur on one review (a face-pair review never carries a burst_score,
+// for instance) naturally end up with independently-learned weights from one combined fit.
+function fitLogisticRegression(rows, features, { epochs = 500, lr = 0.1 } = {}) {
+  const weights = new Array(features.length).fill(0); let bias = 0;
+  for (let epoch = 0; epoch < epochs; epoch++) {
+    const gradW = new Array(features.length).fill(0); let gradB = 0;
+    for (const row of rows) {
+      const z = bias + features.reduce((sum, f, i) => sum + weights[i] * (row[f] ?? 0), 0);
+      const err = 1 / (1 + Math.exp(-z)) - row.label;
+      features.forEach((f, i) => { gradW[i] += err * (row[f] ?? 0); });
+      gradB += err;
+    }
+    features.forEach((f, i) => { weights[i] -= lr * gradW[i] / rows.length; });
+    bias -= lr * gradB / rows.length;
+  }
+  return { weights, bias };
+}
+const sigmoid = z => 1 / (1 + Math.exp(-z));
+// Below this many labeled reviews, a fit is too easily degenerate (e.g. a handful of confirms with
+// no rejects) to trust over the untrained defaults, so scoring keeps using fixed thresholds instead.
+const MIN_FEEDBACK_FOR_TRAINING = 20;
+async function retrainMatchWeights(env) {
+  const rows = (await env.DB.prepare('SELECT face_similarity, burst_score, appearance_similarity, label FROM match_feedback').all()).results;
+  const positives = rows.filter(row => row.label === 1).length;
+  if (rows.length < MIN_FEEDBACK_FOR_TRAINING || positives === 0 || positives === rows.length) {
+    return { trained: false, reviewCount: rows.length };
+  }
+  const features = ['face_similarity', 'burst_score', 'appearance_similarity'];
+  const { weights, bias } = fitLogisticRegression(rows, features);
+  await env.DB.prepare(`UPDATE match_weights
+    SET face_weight = ?, burst_weight = ?, appearance_weight = ?, bias = ?, trained_on = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = 1`).bind(weights[0], weights[1], weights[2], bias, rows.length).run();
+  return { trained: true, reviewCount: rows.length };
+}
+
+// Candidate photo-level fallback links for photos a direct face match can't confidently cover:
+// adjacent frames in a burst sequence whose faces (if any) don't already clear MATCH_THRESHOLD,
+// plus faceless photos whose clothing appearance closely matches a photo that has a detected face.
+const APPEARANCE_POOL_CAP = 150; // bounds worst-case pairwise histogram comparisons per session
+async function generateFallbackLinks(env, targetSessionId = null) {
+  const seen = await env.DB.prepare('SELECT photo1_id, photo2_id, link_type FROM photo_links').all();
+  const linkKey = (a, b, type) => [a, b].sort().join(':') + ':' + type;
+  const existing = new Set(seen.results.map(row => linkKey(row.photo1_id, row.photo2_id, row.link_type)));
+  const candidates = [];
+
+  const weights = await env.DB.prepare('SELECT burst_weight, appearance_weight, bias, trained_on FROM match_weights WHERE id = 1').first();
+  const trained = Boolean(weights) && weights.trained_on >= MIN_FEEDBACK_FOR_TRAINING;
+
+  // -- Burst-sequence candidates --
+  let burstQuery = `SELECT p.id as photo_id, p.session_id, p.captured_at, f.embedding_json
+    FROM photos p LEFT JOIN faces f ON f.photo_id = p.id
+    WHERE p.indexing_status = 'completed' AND p.captured_at IS NOT NULL`;
+  if (targetSessionId) burstQuery += ' AND p.session_id = ?';
+  const burstStatement = env.DB.prepare(burstQuery);
+  const burstRows = (await (targetSessionId ? burstStatement.bind(targetSessionId) : burstStatement).all()).results;
+
+  const bySession = new Map();
+  for (const row of burstRows) {
+    if (!bySession.has(row.session_id)) bySession.set(row.session_id, new Map());
+    const photos = bySession.get(row.session_id);
+    if (!photos.has(row.photo_id)) photos.set(row.photo_id, { id: row.photo_id, capturedAt: row.captured_at, embeddings: [] });
+    if (row.embedding_json) { try { photos.get(row.photo_id).embeddings.push(JSON.parse(row.embedding_json)); } catch { /* skip malformed */ } }
+  }
+
+  const threshold = Number(env.MATCH_THRESHOLD || .62);
+  const gapSeconds = Number(env.BURST_GAP_SECONDS) || 2;
+  for (const [sessionId, photoMap] of bySession) {
+    const ordered = [...photoMap.values()].sort((a, b) => Date.parse(a.capturedAt) - Date.parse(b.capturedAt));
+    for (const group of burstGroups(ordered, gapSeconds)) {
+      for (let i = 0; i < group.ids.length - 1; i++) {
+        const a = photoMap.get(group.ids[i]); const b = photoMap.get(group.ids[i + 1]);
+        const key = linkKey(a.id, b.id, 'burst');
+        if (existing.has(key)) continue;
+        let maxFaceSim = -1;
+        for (const ea of a.embeddings) for (const eb of b.embeddings) maxFaceSim = Math.max(maxFaceSim, similarity(ea, eb));
+        if (maxFaceSim >= threshold) continue; // direct face matching already covers this pair
+        const gap = Math.abs(Date.parse(b.capturedAt) - Date.parse(a.capturedAt)) / 1000;
+        const burstScore = Math.max(0, 1 - gap / gapSeconds);
+        const confidence = trained ? sigmoid(weights.bias + weights.burst_weight * burstScore) : burstScore;
+        if (trained && confidence < 0.5) continue;
+        const [first, second] = [a.id, b.id].sort();
+        candidates.push({ first, second, sessionId, linkType: 'burst', score: confidence });
+      }
+    }
+  }
+
+  // -- Appearance candidates: faceless photos vs. photos with a detected face, same session --
+  let appearanceQuery = `SELECT p.id as photo_id, p.session_id, pa.histogram_json,
+      EXISTS(SELECT 1 FROM faces f WHERE f.photo_id = p.id) as has_face
+    FROM photos p JOIN photo_appearances pa ON pa.photo_id = p.id
+    WHERE p.indexing_status = 'completed'`;
+  if (targetSessionId) appearanceQuery += ' AND p.session_id = ?';
+  const appearanceStatement = env.DB.prepare(appearanceQuery);
+  const appearanceRows = (await (targetSessionId ? appearanceStatement.bind(targetSessionId) : appearanceStatement).all()).results;
+
+  const appearanceBySession = new Map();
+  for (const row of appearanceRows) {
+    if (!appearanceBySession.has(row.session_id)) appearanceBySession.set(row.session_id, { faceless: [], withFace: [] });
+    let histogram; try { histogram = JSON.parse(row.histogram_json); } catch { continue; }
+    const pool = appearanceBySession.get(row.session_id);
+    (row.has_face ? pool.withFace : pool.faceless).push({ id: row.photo_id, histogram });
+  }
+  const appearanceThreshold = Number(env.APPEARANCE_THRESHOLD || .85);
+  for (const [sessionId, { faceless, withFace }] of appearanceBySession) {
+    for (const a of faceless.slice(0, APPEARANCE_POOL_CAP)) {
+      for (const b of withFace.slice(0, APPEARANCE_POOL_CAP)) {
+        const key = linkKey(a.id, b.id, 'appearance');
+        if (existing.has(key)) continue;
+        const rawScore = histogramSimilarity(a.histogram, b.histogram);
+        if (!Number.isFinite(rawScore)) continue;
+        const confidence = trained ? sigmoid(weights.bias + weights.appearance_weight * rawScore) : rawScore;
+        if (trained ? confidence < 0.5 : rawScore < appearanceThreshold) continue;
+        const [first, second] = [a.id, b.id].sort();
+        candidates.push({ first, second, sessionId, linkType: 'appearance', score: confidence });
+      }
+    }
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  const statements = candidates.slice(0, 20).map(pair => env.DB.prepare(`INSERT OR IGNORE INTO photo_links
+    (id, session_id, photo1_id, photo2_id, link_type, score, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')`).bind(id(), pair.sessionId, pair.first, pair.second, pair.linkType, pair.score));
+  if (!statements.length) return 0;
+  const linkResults = await env.DB.batch(statements);
+  return linkResults.reduce((sum, result) => sum + Number(result.meta?.changes || 0), 0);
+}
+
+// Named export solely for direct unit testing of the pure grouping logic; the Cloudflare Workers
+// runtime only uses the default export below.
+export { burstGroups };
 
 export default {
   async queue(batch, env) { for (const message of batch.messages) await consumePhoto(message, env); },
@@ -324,7 +547,7 @@ export default {
         if (completedPhotos === 0 && pendingPhotos === 0) return error('This session’s photos could not be processed yet. Please ask the crew to retry indexing.', request, env, 422);
         if (completedPhotos === 0 && pendingPhotos > 0) return error('This session is still processing. Please check back shortly.', request, env, 422);
 
-        const faceResults = await extractFaces(file, env);
+        const { faces: faceResults } = await extractFaces(file, env);
         if (faceResults.length !== 1) return error(faceResults.length ? 'Please use a selfie with only one clearly visible face.' : 'We could not find a clear face. Try a brighter, straight-on selfie.', request, env);
 
         const embedding = faceResults[0]?.embedding;
@@ -339,7 +562,31 @@ export default {
           scores.set(face.photo_id, Math.max(scores.get(face.photo_id) || -1, score));
         }
         const threshold = Number(env.MATCH_THRESHOLD || 0.62);
-        const matches = [...scores.entries()].filter(([, score]) => score >= threshold).sort((a, b) => b[1] - a[1]).slice(0, 80);
+        let matches = [...scores.entries()].filter(([, score]) => score >= threshold).sort((a, b) => b[1] - a[1]).slice(0, 80);
+
+        // Crew-confirmed burst/appearance links extend a direct match to its linked photo even
+        // when that photo has no usable face of its own — but only once a human has confirmed the
+        // pairing (pending/rejected links never reach a guest). The linked photo's own score never
+        // gates inclusion here since the pairing is already human-verified ground truth.
+        const matchedIds = new Set(matches.map(([photoId]) => photoId));
+        if (matchedIds.size) {
+          const idList = [...matchedIds];
+          const linkRows = await env.DB.prepare(`SELECT photo1_id, photo2_id FROM photo_links
+            WHERE status = 'confirmed' AND session_id = ?
+              AND (photo1_id IN (${idList.map(() => '?').join(',')}) OR photo2_id IN (${idList.map(() => '?').join(',')}))`)
+            .bind(sessionId, ...idList, ...idList).all();
+          const CONFIRMED_LINK_SCORE_DISCOUNT = 0.9;
+          const extensions = [];
+          for (const { photo1_id, photo2_id } of linkRows.results) {
+            for (const [anchor, other] of [[photo1_id, photo2_id], [photo2_id, photo1_id]]) {
+              if (!matchedIds.has(anchor) || matchedIds.has(other)) continue;
+              matchedIds.add(other);
+              extensions.push([other, (scores.get(anchor) ?? threshold) * CONFIRMED_LINK_SCORE_DISCOUNT]);
+            }
+          }
+          if (extensions.length) matches = [...matches, ...extensions].sort((a, b) => b[1] - a[1]).slice(0, 80);
+        }
+
         const photoIds = matches.map(([photoId]) => photoId);
         const searchId = id();
         await env.DB.prepare('INSERT INTO searches (id, session_id, matched_photo_ids_json, price_paise, currency, expires_at) VALUES (?, ?, ?, ?, ?, ?)')
@@ -641,7 +888,102 @@ export default {
         `).bind(newStatus, pairId).run();
         if (!decision.meta?.changes) return error('This pair was already reviewed or is no longer available. Refresh the queue.', request, env, 409);
 
+        const pair = await env.DB.prepare('SELECT similarity FROM face_verifications WHERE id = ?').bind(pairId).first();
+        if (pair) await env.DB.prepare('INSERT INTO match_feedback (id, source, face_similarity, label) VALUES (?, ?, ?, ?)').bind(id(), 'face_pair', pair.similarity, confirmed ? 1 : 0).run();
+
         return response({ success: true, status: newStatus }, request, env);
+      }
+
+      // POST /api/admin/link-queue/scan - Generate candidate burst/appearance fallback links
+      if (request.method === 'POST' && url.pathname === '/api/admin/link-queue/scan') {
+        if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
+        const count = await generateFallbackLinks(env);
+        return response({ generated: count }, request, env);
+      }
+
+      // GET /api/admin/link-queue - Fetch photo-level fallback links needing confirmation
+      if (request.method === 'GET' && url.pathname === '/api/admin/link-queue') {
+        if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
+        const base = url.origin;
+
+        const query = `
+          SELECT
+            pl.id, pl.link_type, pl.score, s.title as session_title,
+            p1.id as photo1_id, p1.filename as photo1_filename,
+            p2.id as photo2_id, p2.filename as photo2_filename
+          FROM photo_links pl
+          JOIN sessions s ON s.id = pl.session_id
+          JOIN photos p1 ON p1.id = pl.photo1_id
+          JOIN photos p2 ON p2.id = pl.photo2_id
+          WHERE pl.status = 'pending' AND p1.indexing_status = 'completed' AND p2.indexing_status = 'completed'
+          ORDER BY pl.score DESC
+        `;
+        let res = await env.DB.prepare(query).all();
+        let reviewable = res.results;
+        if (!reviewable.length) {
+          await generateFallbackLinks(env);
+          res = await env.DB.prepare(query).all();
+          reviewable = res.results;
+        }
+
+        const queue = await Promise.all(reviewable.slice(0, 20).map(async (item) => ({
+          id: item.id,
+          linkType: item.link_type,
+          scorePct: Math.round(item.score * 100),
+          sessionTitle: item.session_title,
+          photo1: {
+            id: item.photo1_id,
+            filename: item.photo1_filename,
+            url: `${base}/api/media/${item.photo1_id}?variant=original&token=${encodeURIComponent(await mediaToken(item.photo1_id, 'original', env))}`,
+          },
+          photo2: {
+            id: item.photo2_id,
+            filename: item.photo2_filename,
+            url: `${base}/api/media/${item.photo2_id}?variant=original&token=${encodeURIComponent(await mediaToken(item.photo2_id, 'original', env))}`,
+          },
+        })));
+
+        const stats = await env.DB.prepare(`
+          SELECT
+            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+            SUM(CASE WHEN status = 'confirmed' THEN 1 ELSE 0 END) as confirmed,
+            SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected
+          FROM photo_links
+        `).first();
+        const weights = await env.DB.prepare('SELECT trained_on FROM match_weights WHERE id = 1').first();
+
+        return response({ queue, stats: { pending: reviewable.length, confirmed: stats?.confirmed || 0, rejected: stats?.rejected || 0 }, trainedOn: weights?.trained_on || 0 }, request, env);
+      }
+
+      // POST /api/admin/confirm-link - Confirm or reject a fallback photo link
+      if (request.method === 'POST' && url.pathname === '/api/admin/confirm-link') {
+        if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
+        const { linkId, confirmed } = await readJson(request);
+        if (typeof linkId !== 'string' || typeof confirmed !== 'boolean') return error('Choose same person or different people for a valid link.', request, env);
+        const newStatus = confirmed ? 'confirmed' : 'rejected';
+
+        const decision = await env.DB.prepare(`
+          UPDATE photo_links
+          SET status = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND status = 'pending'
+        `).bind(newStatus, linkId).run();
+        if (!decision.meta?.changes) return error('This link was already reviewed or is no longer available. Refresh the queue.', request, env, 409);
+
+        const link = await env.DB.prepare('SELECT link_type, score FROM photo_links WHERE id = ?').bind(linkId).first();
+        if (link) {
+          const label = confirmed ? 1 : 0;
+          if (link.link_type === 'appearance') await env.DB.prepare('INSERT INTO match_feedback (id, source, appearance_similarity, label) VALUES (?, ?, ?, ?)').bind(id(), 'appearance_link', link.score, label).run();
+          else await env.DB.prepare('INSERT INTO match_feedback (id, source, burst_score, label) VALUES (?, ?, ?, ?)').bind(id(), 'burst_link', link.score, label).run();
+        }
+
+        return response({ success: true, status: newStatus }, request, env);
+      }
+
+      // POST /api/admin/retrain - Refit match-scoring weights from accumulated crew review decisions
+      if (request.method === 'POST' && url.pathname === '/api/admin/retrain') {
+        if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
+        const result = await retrainMatchWeights(env);
+        return response(result, request, env);
       }
 
       const reindex = url.pathname.match(/^\/api\/admin\/reindex$/);
@@ -658,35 +1000,22 @@ export default {
         const sessionId = upload[1]; const session = await env.DB.prepare('SELECT id, status FROM sessions WHERE id = ?').bind(sessionId).first();
         if (!session) return error('Session not found. Create a session before uploading.', request, env, 404);
         if (session.status === 'archived') return error('Restore this archived session before uploading more photos.', request, env, 409);
-        const form = await readForm(request, 32 * 1024 * 1024); const file = form.get('file'); const preview = form.get('preview');
-        if (!(file instanceof File) || !(preview instanceof File) || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || preview.type !== 'image/jpeg' || !file.size || file.size > 25 * 1024 * 1024 || !preview.size || preview.size > 5 * 1024 * 1024) return error('An image and its preview are required.', request, env);
-        // onDuplicate decides what happens when this session already holds a photo with the same name.
-        const onDuplicate = form.get('onDuplicate');
+        if (Number(request.headers.get('content-length')) > 32 * 1024 * 1024) return error('The upload is too large.', request, env, 413);
+        const uploadType = request.headers.get('content-type') || '';
+        if (uploadType.includes('multipart/form-data')) {
+          // Legacy buffered upload — kept so a client that has not switched to streaming still works.
+          const form = await readForm(request, 32 * 1024 * 1024); const file = form.get('file'); const preview = form.get('preview');
+          if (!(file instanceof File) || !(preview instanceof File) || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || preview.type !== 'image/jpeg' || !file.size || file.size > 25 * 1024 * 1024 || !preview.size || preview.size > 5 * 1024 * 1024) return error('An image and its preview are required.', request, env);
+          const onDuplicate = form.get('onDuplicate');
+          if (onDuplicate !== null && !DUPLICATE_MODES.includes(onDuplicate)) return error('Choose replace, skip or rename for duplicate photos.', request, env);
+          return storeSessionPhoto(env, request, sessionId, { filename: file.name, contentType: file.type, original: file, preview, onDuplicate });
+        }
+        // Streaming upload — metadata in the query string, body is [len][preview][original].
+        const type = url.searchParams.get('type'); const onDuplicate = url.searchParams.get('onDuplicate');
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(type)) return error('An image and its preview are required.', request, env);
         if (onDuplicate !== null && !DUPLICATE_MODES.includes(onDuplicate)) return error('Choose replace, skip or rename for duplicate photos.', request, env);
-        let filename = safeFilename(file.name); let duplicates = [];
-        if (onDuplicate) {
-          duplicates = (await env.DB.prepare('SELECT id, object_key, preview_key FROM photos WHERE session_id = ? AND filename = ? COLLATE NOCASE').bind(sessionId, filename).all()).results;
-          if (duplicates.length && onDuplicate === 'skip') return response({ skipped: true, filename }, request, env);
-          if (duplicates.length && onDuplicate === 'rename') {
-            const taken = new Set((await env.DB.prepare('SELECT filename FROM photos WHERE session_id = ?').bind(sessionId).all()).results.map(row => row.filename.toLowerCase()));
-            filename = uniqueFilename(filename, taken);
-          }
-        }
-        const photoId = id(); const objectKey = `sessions/${sessionId}/original/${photoId}-${filename}`; const previewKey = `sessions/${sessionId}/preview/${photoId}.jpg`;
-        await Promise.all([
-          env.PHOTOS.put(objectKey, file, { httpMetadata: { contentType: file.type } }),
-          env.PHOTOS.put(previewKey, preview, { httpMetadata: { contentType: 'image/jpeg' } }),
-        ]);
-        await env.DB.prepare("INSERT INTO photos (id, session_id, object_key, preview_key, filename, content_type, indexing_status) VALUES (?, ?, ?, ?, ?, ?, 'pending')").bind(photoId, sessionId, objectKey, previewKey, filename, file.type).run();
-        if (duplicates.length && onDuplicate === 'replace') {
-          // Remove the old rows before their files so a failed delete never leaves a photo pointing at missing media.
-          await env.DB.batch(duplicates.flatMap(photo => [env.DB.prepare('DELETE FROM faces WHERE photo_id = ?').bind(photo.id), env.DB.prepare('DELETE FROM photos WHERE id = ?').bind(photo.id)]));
-          await Promise.all(duplicates.flatMap(photo => [env.PHOTOS.delete(photo.object_key), env.PHOTOS.delete(photo.preview_key)]));
-        }
-
-        const processing = await enqueuePhotos([{ id: photoId }], env);
-
-        return response({ photoId, filename, status: processing.failed ? 'failed' : 'pending', duplicate: duplicates.length ? (onDuplicate === 'replace' ? 'replaced' : 'renamed') : null, replaced: onDuplicate === 'replace' ? duplicates.length : 0 }, request, env, 201);
+        const { preview, original } = await readFramedUpload(request, 5 * 1024 * 1024);
+        return storeSessionPhoto(env, request, sessionId, { filename: url.searchParams.get('filename') || 'photo.jpg', contentType: type, original, preview, onDuplicate });
       }
 
       const publish = url.pathname.match(/^\/api\/admin\/sessions\/([\w-]+)\/publish$/);
@@ -702,7 +1031,7 @@ export default {
         const raw = await request.text();
         const signature = request.headers.get('x-webhook-signature');
         const timestamp = request.headers.get('x-webhook-timestamp');
-        if (!env.CASHFREE_WEBHOOK_SECRET || !timestamp || !signature || !same(await hmacBase64(`${timestamp}${raw}`, env.CASHFREE_WEBHOOK_SECRET), signature)) return error('Invalid webhook signature.', request, env, 401);
+        if (!env.CASHFREE_SECRET_KEY || !timestamp || !signature || !same(await hmacBase64(`${timestamp}${raw}`, env.CASHFREE_SECRET_KEY), signature)) return error('Invalid webhook signature.', request, env, 401);
         const event = JSON.parse(raw);
         if (event.type === 'PAYMENT_SUCCESS_WEBHOOK') {
           const orderId = event.data?.order?.order_id;
