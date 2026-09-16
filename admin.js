@@ -1,4 +1,4 @@
-// Mambo Jambo crew studio.
+// Surfers of India crew studio.
 const apiBase = (window.MJ_CONFIG?.apiUrl || '').replace(/\/$/, '');
 const isLive = Boolean(apiBase);
 const apiUrl = (path) => path.startsWith('http') ? path : `${apiBase}${path}`;
@@ -85,16 +85,25 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
       signal: AbortSignal.timeout(20000),
     });
     const body = await result.json().catch(() => ({}));
-    if (!result.ok) throw new Error(body.error || 'Incorrect password.');
+    if (!result.ok) throw new Error(body.error || (result.status === 401 ? 'Incorrect password.' : 'The photo service is unavailable. Please try again.'));
+    if (typeof body.token !== 'string' || !body.token) throw new Error('Sign-in could not be completed. Please refresh and try again.');
     setToken(body.token);
     passwordEl.value = '';
     showApp();
   } catch (err) {
-    errorEl.textContent = err.message;
+    errorEl.textContent = err.name === 'TimeoutError' ? 'Sign-in took too long. Please try again.' : err instanceof TypeError ? 'Cannot reach the photo service. Check your connection and try again.' : err.message;
   } finally {
     btn.disabled = false;
     btn.innerHTML = 'Enter studio <span>→</span>';
   }
+});
+
+document.getElementById('togglePassword').addEventListener('click', event => {
+  const input = document.getElementById('adminPassword');
+  const visible = input.type === 'password';
+  input.type = visible ? 'text' : 'password';
+  event.currentTarget.textContent = visible ? 'Hide' : 'Show';
+  event.currentTarget.setAttribute('aria-pressed', String(visible));
 });
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
@@ -117,14 +126,19 @@ const photoGalleryModal = document.getElementById('photoGalleryModal');
 const closeGalleryModal = document.getElementById('closeGalleryModal');
 const editSessionModal  = document.getElementById('editSessionModal');
 const closeEditModal    = document.getElementById('closeEditModal');
+const uploadMoreModal   = document.getElementById('uploadMoreModal');
+const closeMoreModal    = document.getElementById('closeMoreModal');
 
 function openModal(modal) { modal.querySelector('.modal-notice')?.remove(); modal.classList.remove('hidden'); if (!modal.open) modal.showModal(); }
-[photoGalleryModal, editSessionModal].forEach(modal => {
+[photoGalleryModal, editSessionModal, uploadMoreModal].forEach(modal => {
   modal.addEventListener('close', () => modal.classList.add('hidden'));
-  modal.addEventListener('click', event => { if (event.target === modal) modal.close(); });
+  modal.addEventListener('click', event => { if (event.target === modal && !uploadBusy) modal.close(); });
+  // Escape must not abandon an upload that is still sending files.
+  modal.addEventListener('cancel', event => { if (uploadBusy) event.preventDefault(); });
 });
 closeGalleryModal.addEventListener('click', () => photoGalleryModal.close());
 closeEditModal.addEventListener('click', () => editSessionModal.close());
+closeMoreModal.addEventListener('click', () => { if (!uploadBusy) uploadMoreModal.close(); });
 document.querySelector('.tabs').addEventListener('keydown', event => {
   const buttons = [...document.querySelectorAll('.tab-btn')]; const index = buttons.indexOf(document.activeElement);
   if (index < 0 || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
@@ -171,7 +185,7 @@ async function watermarkedPreview(file) {
   ctx.fillStyle = '#ffffff';
   ctx.font = `700 ${Math.max(20, Math.round(canvas.width / 18))}px Work Sans, sans-serif`;
   ctx.textAlign = 'center';
-  ctx.fillText('MAMBO JAMBO  •  PREVIEW', 0, 0);
+  ctx.fillText('SURFERS OF INDIA  •  PREVIEW', 0, 0);
   ctx.restore();
   return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not prepare this photo for upload.')), 'image/jpeg', .82));
 }
@@ -209,13 +223,16 @@ function hideProgress() {
   document.getElementById('progressFill').style.width = '0%';
 }
 
+const UNSUPPORTED_FILES = 'Choose only JPG, PNG or WebP photos up to 25 MB each. Remove unsupported files and select again.';
+function isSupportedPhoto(file) { return ['image/jpeg', 'image/png', 'image/webp'].includes(file.type) && file.size > 0 && file.size <= 25 * 1024 * 1024; }
+
 function selectFiles(files) {
   if (uploadBusy) return;
   const selected = [...files];
-  adminFiles = selected.filter(f => ['image/jpeg', 'image/png', 'image/webp'].includes(f.type) && f.size > 0 && f.size <= 25 * 1024 * 1024);
+  adminFiles = selected.filter(isSupportedPhoto);
   if (adminFiles.length !== selected.length) {
     adminFiles = []; renderFileList();
-    setStatus('Choose only JPG, PNG or WebP photos up to 25 MB each. Remove unsupported files and select again.', true);
+    setStatus(UNSUPPORTED_FILES, true);
     return;
   }
   renderFileList();
@@ -252,6 +269,68 @@ photoInput.addEventListener('change', (e) => selectFiles(e.target.files));
 ['dragleave', 'drop'].forEach((t) => dropZone.addEventListener(t, (e) => { e.preventDefault(); dropZone.classList.remove('dragging'); }));
 dropZone.addEventListener('drop', (e) => selectFiles(e.dataTransfer.files));
 
+// ── Upload: shared batch sender ───────────────────────────────────────────────
+
+// Send originals plus watermarked previews three at a time and report combined progress.
+// Each item is { file, onDuplicate? }. Resolves with per-file results and failures.
+async function uploadPhotoBatch(sessionId, items, onProgress) {
+  const totalBytes = items.reduce((sum, item) => sum + item.file.size, 0);
+  const startTime = performance.now();
+  const fileProgress = new Array(items.length).fill(0);
+  const report = () => {
+    const uploaded = fileProgress.reduce((a, b) => a + b, 0);
+    const elapsed = (performance.now() - startTime) / 1000;
+    const speed = (uploaded / 1024) / Math.max(elapsed, 0.1);
+    const remaining = Math.max(0, totalBytes - uploaded) / 1024;
+    onProgress(Math.round((uploaded / totalBytes) * 100), speed, speed > 0 ? `ETA: ${Math.ceil(remaining / speed)}s` : '');
+  };
+
+  const uploadOne = (item, preview, index) => new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append('file', item.file);
+    form.append('preview', preview, `${item.file.name.replace(/\.[^.]+$/, '')}-preview.jpg`);
+    if (item.onDuplicate) form.append('onDuplicate', item.onDuplicate);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', apiUrl(`/api/admin/sessions/${sessionId}/photos`));
+    xhr.setRequestHeader('authorization', `Bearer ${getToken()}`);
+    xhr.timeout = 120000;
+    xhr.ontimeout = () => reject(new Error('Upload timed out. Please try again.'));
+    xhr.onabort = () => reject(new Error('Upload cancelled.'));
+    xhr.upload.onprogress = (ev) => {
+      if (!ev.lengthComputable) return;
+      fileProgress[index] = Math.min(item.file.size, item.file.size * ev.loaded / ev.total);
+      report();
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        fileProgress[index] = item.file.size; report();
+        try { resolve(JSON.parse(xhr.responseText)); }
+        catch { reject(new Error('Invalid upload response.')); }
+      } else {
+        let detail = `HTTP ${xhr.status}`;
+        try { detail = JSON.parse(xhr.responseText).error || detail; } catch { /* Non-JSON gateway response. */ }
+        reject(new Error(detail));
+      }
+    };
+    xhr.onerror = () => reject(new Error('Network error.'));
+    xhr.send(form);
+  });
+
+  onProgress(0, 0, 'calculating...');
+  // Wait for every in-flight upload before reporting failure. Limit memory use.
+  const queue = items.map((item, index) => ({ item, index }));
+  const results = []; const failures = [];
+  await Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => {
+    while (queue.length) {
+      const { item, index } = queue.shift();
+      try { results.push(await uploadOne(item, await watermarkedPreview(item.file), index)); }
+      catch (error) { failures.push(`${item.file.name}: ${error.message}`); }
+    }
+  }));
+  return { results, failures };
+}
+
 // ── Upload: publish ───────────────────────────────────────────────────────────
 
 document.getElementById('uploadForm').addEventListener('submit', async (e) => {
@@ -280,63 +359,8 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
     });
 
     const sessionId = create.session.id;
-    const totalBytes = adminFiles.reduce((acc, f) => acc + f.size, 0);
-    const startTime = performance.now();
-    let fileProgress = new Array(adminFiles.length).fill(0);
-
-    const uploadOne = (file, preview, index) => new Promise((resolve, reject) => {
-      const form = new FormData();
-      form.append('file', file);
-      form.append('preview', preview, `${file.name.replace(/\.[^.]+$/, '')}-preview.jpg`);
-
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', apiUrl(`/api/admin/sessions/${sessionId}/photos`));
-      xhr.setRequestHeader('authorization', `Bearer ${getToken()}`);
-      xhr.timeout = 120000;
-      xhr.ontimeout = () => reject(new Error(`Upload timed out: ${file.name}. Please try again.`));
-      xhr.onabort = () => reject(new Error(`Upload cancelled: ${file.name}`));
-
-      xhr.upload.onprogress = (ev) => {
-        if (ev.lengthComputable) {
-          fileProgress[index] = Math.min(file.size, file.size * ev.loaded / ev.total);
-          const uploaded = fileProgress.reduce((a, b) => a + b, 0);
-          const elapsed = (performance.now() - startTime) / 1000;
-          const speed = (uploaded / 1024) / Math.max(elapsed, 0.1);
-          const remaining = Math.max(0, totalBytes - uploaded) / 1024;
-          const eta = speed > 0 ? `ETA: ${Math.ceil(remaining / speed)}s` : '';
-          const pct = Math.round((uploaded / totalBytes) * 100);
-          setProgress(pct, speed, eta);
-        }
-      };
-
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          fileProgress[index] = file.size;
-          try { resolve(JSON.parse(xhr.responseText)); }
-          catch { reject(new Error(`Invalid upload response: ${file.name}`)); }
-        } else {
-          let detail = `HTTP ${xhr.status}`;
-          try { detail = JSON.parse(xhr.responseText).error || detail; } catch { /* Non-JSON gateway response. */ }
-          reject(new Error(`${file.name}: ${detail}`));
-        }
-      };
-      xhr.onerror = () => reject(new Error(`Network error: ${file.name}`));
-      xhr.send(form);
-    });
-
     setStatus(`Uploading ${adminFiles.length} photo${adminFiles.length === 1 ? '' : 's'}…`);
-    setProgress(0, 0, 'calculating...');
-
-    // Wait for every in-flight upload before reporting failure. Limit memory use.
-    const queue = adminFiles.map((file, index) => ({ file, index }));
-    const failures = [];
-    await Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => {
-      while (queue.length) {
-        const { file, index } = queue.shift();
-        try { await uploadOne(file, await watermarkedPreview(file), index); }
-        catch (error) { failures.push(`${file.name}: ${error.message}`); }
-      }
-    }));
+    const { failures } = await uploadPhotoBatch(sessionId, adminFiles.map(file => ({ file })), setProgress);
     if (failures.length) throw new Error(`${failures.length} upload(s) failed. The draft is still private; open Sessions to review uploaded photos. ${failures[0]}`);
 
     // Mark session published
@@ -405,7 +429,7 @@ async function loadDashboard(silent = false) {
         badgeHtml = `<span class="indexing-badge processing">${pct}% Indexed</span>`;
       }
 
-      const priceRs = Math.round((s.price_paise || 29900) / 100);
+      const priceRs = Math.round((s.price_paise ?? 70000) / 100);
 
       return `
         <div class="d-card">
@@ -430,6 +454,7 @@ async function loadDashboard(silent = false) {
           ` : ''}
           <div class="action-group">
             <button class="btn-sm btn-primary-sm view-photos-btn" data-session-id="${escHtml(s.id)}" data-session-title="${escHtml(s.title)}">📷 View Photos (${total})</button>
+            <button class="btn-sm upload-more-btn" data-session-id="${escHtml(s.id)}" data-session-title="${escHtml(s.title)}" ${s.status === 'archived' ? 'disabled title="Restore this archived session before uploading more photos."' : ''}>⬆ Upload more</button>
             <button class="btn-sm edit-session-btn" data-session-id="${escHtml(s.id)}" data-title="${escHtml(s.title)}" data-date="${escHtml(s.date || '')}" data-location="${escHtml(s.location || '')}" data-price="${priceRs}" data-status="${s.status}">✏️ Edit</button>
             <button class="btn-sm reindex-btn" data-session-id="${escHtml(s.id)}" ${pending > 0 ? 'disabled' : ''}>${pending > 0 ? 'Processing…' : '↻ Re-index'}</button>
             <button class="delete-btn" data-session-id="${escHtml(s.id)}">Delete</button>
@@ -540,6 +565,15 @@ document.getElementById('dashboardGrid').addEventListener('click', async (e) => 
     return viewSessionPhotos(viewBtn.dataset.sessionId, viewBtn.dataset.sessionTitle);
   }
 
+  // Upload more photos into this session
+  const moreBtn = e.target.closest('.upload-more-btn');
+  if (moreBtn) {
+    if (uploadBusy) return notifyCrew('Wait for the current upload to finish before adding more photos.');
+    moreUpload = { sessionId: moreBtn.dataset.sessionId, title: moreBtn.dataset.sessionTitle, items: [], duplicates: [] };
+    morePhotoInput.click();
+    return;
+  }
+
   // Edit Session
   const editBtn = e.target.closest('.edit-session-btn');
   if (editBtn) {
@@ -592,6 +626,138 @@ document.getElementById('dashboardGrid').addEventListener('click', async (e) => 
 
 document.getElementById('refreshBtn').addEventListener('click', () => loadDashboard());
 
+// ── Upload more photos into an existing session ───────────────────────────────
+
+const morePhotoInput = document.getElementById('morePhotoInput');
+const moreConfirmBtn = document.getElementById('moreConfirmBtn');
+const moreCancelBtn  = document.getElementById('moreCancelBtn');
+let moreUpload = null; // { sessionId, title, items: [{ file, name, duplicate }], duplicates }
+
+// Mirror the Worker's safeFilename so the duplicate check compares stored names.
+function storedFilename(name) { return (name || 'photo.jpg').replace(/[^a-zA-Z0-9._-]/g, '-').slice(-120); }
+const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+
+function setMoreStatus(text, isError = false) {
+  const el = document.getElementById('moreStatus');
+  el.textContent = text; el.className = 'upload-status' + (text ? ' visible' : '') + (isError ? ' error' : '');
+}
+function setMoreProgress(percent, speed, eta) {
+  document.getElementById('moreProgressWrap').classList.remove('hidden');
+  document.getElementById('moreProgressFill').style.width = `${Math.min(100, percent)}%`;
+  document.getElementById('moreProgressSpeed').textContent = speed ? `${Math.round(speed)} KB/s` : '';
+  document.getElementById('moreProgressEta').textContent = eta || '';
+}
+function resetMoreModal() {
+  document.getElementById('moreSummary').textContent = 'Checking your selection…';
+  document.getElementById('moreDuplicates').hidden = true;
+  document.getElementById('moreChoice').hidden = true;
+  document.querySelector('input[name=duplicateMode][value=skip]').checked = true;
+  document.getElementById('moreProgressWrap').classList.add('hidden');
+  document.getElementById('moreProgressFill').style.width = '0%';
+  setMoreStatus('');
+  moreConfirmBtn.disabled = true; moreConfirmBtn.innerHTML = 'Upload photos <span>→</span>';
+  moreCancelBtn.textContent = 'Cancel';
+}
+
+morePhotoInput.addEventListener('click', (e) => { e.target.value = null; });
+morePhotoInput.addEventListener('change', (e) => prepareUploadMore(e.target.files));
+moreCancelBtn.addEventListener('click', () => { if (!uploadBusy) uploadMoreModal.close(); });
+
+async function prepareUploadMore(fileList) {
+  const files = [...fileList];
+  if (!moreUpload || uploadBusy || !files.length) return;
+  if (!files.every(isSupportedPhoto)) return notifyCrew(UNSUPPORTED_FILES);
+  resetMoreModal();
+  document.getElementById('moreModalTitle').textContent = `Upload more — ${moreUpload.title}`;
+  openModal(uploadMoreModal);
+  try {
+    const { photos } = await apiRequest(`/api/admin/sessions/${moreUpload.sessionId}/photos`);
+    if (!uploadMoreModal.open) return;
+    const existing = new Set(photos.map(photo => photo.filename.toLowerCase()));
+    // The same name picked twice from different folders is sent once.
+    const seen = new Set(); const items = []; let repeated = 0;
+    for (const file of files) {
+      const name = storedFilename(file.name); const key = name.toLowerCase();
+      if (seen.has(key)) { repeated += 1; continue; }
+      seen.add(key); items.push({ file, name, duplicate: existing.has(key) });
+    }
+    moreUpload.items = items; moreUpload.duplicates = items.filter(item => item.duplicate);
+    renderUploadMore(repeated);
+  } catch (err) {
+    document.getElementById('moreSummary').textContent = 'The existing photos could not be checked.';
+    setMoreStatus(err.message, true);
+  }
+}
+
+function renderUploadMore(repeated) {
+  const { items, duplicates } = moreUpload;
+  const fresh = items.length - duplicates.length;
+  const summary = document.getElementById('moreSummary'); summary.replaceChildren();
+  const count = document.createElement('strong'); count.textContent = plural(items.length, 'photo');
+  summary.append(count, ' selected. ');
+  if (duplicates.length) summary.append(`${plural(duplicates.length, 'photo')} already exist${duplicates.length === 1 ? 's' : ''} in this session; ${fresh} ${fresh === 1 ? 'is' : 'are'} new.`);
+  else summary.append('None of them are in this session yet.');
+  if (repeated) summary.append(` ${plural(repeated, 'repeated file')} in your selection ${repeated === 1 ? 'was' : 'were'} dropped.`);
+
+  const panel = document.getElementById('moreDuplicates'); panel.hidden = !duplicates.length;
+  if (duplicates.length) {
+    document.getElementById('moreDuplicatesTitle').textContent = `Already in this session (${duplicates.length})`;
+    const list = document.getElementById('moreDuplicateList'); list.replaceChildren();
+    duplicates.slice(0, 40).forEach(item => { const row = document.createElement('li'); row.textContent = item.name; list.append(row); });
+    if (duplicates.length > 40) { const row = document.createElement('li'); row.textContent = `… and ${duplicates.length - 40} more`; list.append(row); }
+  }
+  document.getElementById('moreChoice').hidden = !duplicates.length;
+  moreConfirmBtn.disabled = false;
+  updateMoreConfirmLabel();
+}
+
+function plannedUploads() {
+  if (!moreUpload) return [];
+  const mode = moreUpload.duplicates.length ? document.querySelector('input[name=duplicateMode]:checked')?.value : '';
+  const items = mode === 'skip' ? moreUpload.items.filter(item => !item.duplicate) : moreUpload.items;
+  return items.map(item => ({ file: item.file, onDuplicate: mode || undefined }));
+}
+function updateMoreConfirmLabel() {
+  const count = plannedUploads().length;
+  moreConfirmBtn.innerHTML = count ? `Upload ${plural(count, 'photo')} <span>→</span>` : 'Nothing to upload';
+  moreConfirmBtn.disabled = !count;
+}
+document.getElementById('moreChoice').addEventListener('change', updateMoreConfirmLabel);
+
+moreConfirmBtn.addEventListener('click', async () => {
+  const items = plannedUploads();
+  if (!items.length || uploadBusy) return;
+  const controls = uploadMoreModal.querySelectorAll('input, button');
+  uploadBusy = true; controls.forEach(control => { control.disabled = true; }); signOutBtn.disabled = true;
+  moreConfirmBtn.innerHTML = 'Uploading…';
+  setMoreStatus(`Uploading ${plural(items.length, 'photo')}…`);
+  try {
+    const { results, failures } = await uploadPhotoBatch(moreUpload.sessionId, items, setMoreProgress);
+    const uploaded = results.filter(result => !result.skipped);
+    const replaced = uploaded.reduce((sum, result) => sum + (result.replaced || 0), 0);
+    const renamed = uploaded.filter(result => result.duplicate === 'renamed');
+    const skipped = results.filter(result => result.skipped).length + (moreUpload.items.length - items.length);
+    const parts = [`${plural(uploaded.length, 'photo')} uploaded and queued for face indexing.`];
+    if (replaced) parts.push(`${plural(replaced, 'existing photo')} replaced.`);
+    if (renamed.length) parts.push(`${renamed.length === 1 ? '1 copy' : `${renamed.length} copies`} saved as ${renamed.slice(0, 3).map(result => result.filename).join(', ')}${renamed.length > 3 ? '…' : ''}.`);
+    if (skipped) parts.push(`${plural(skipped, 'duplicate')} skipped.`);
+    if (failures.length) parts.push(`${plural(failures.length, 'upload')} failed — ${failures[0]}`);
+    setMoreStatus(parts.join(' '), Boolean(failures.length));
+    if (!failures.length) document.getElementById('moreProgressWrap').classList.add('hidden');
+    moreUpload.items = []; moreUpload.duplicates = [];
+    loadDashboard(true);
+  } catch (err) {
+    setMoreStatus(err.message || 'Upload failed.', true);
+  } finally {
+    uploadBusy = false; signOutBtn.disabled = false;
+    controls.forEach(control => { control.disabled = false; });
+    moreConfirmBtn.disabled = true; moreConfirmBtn.innerHTML = 'Upload photos <span>→</span>';
+    moreCancelBtn.textContent = 'Done';
+    document.getElementById('moreChoice').hidden = true;
+    document.getElementById('moreDuplicates').hidden = true;
+  }
+});
+
 // ── Crew Match Verification Queue ─────────────────────────────────────────────
 
 const faceImages = new WeakMap();
@@ -607,24 +773,76 @@ function renderFace(canvas, zoom = 1) {
   context.fillStyle = '#e7e2d6'; context.fillRect(0, 0, canvas.width, canvas.height);
   context.drawImage(image, x, y, cropWidth, cropHeight, (canvas.width - cropWidth * scale) / 2, (canvas.height - cropHeight * scale) / 2, cropWidth * scale, cropHeight * scale);
 }
-function drawCroppedFaceCanvas(canvas) {
-  const card = canvas.closest('.verify-card'); const image = new Image(); image.crossOrigin = 'anonymous';
-  image.onload = () => {
+// Share downloads and decoded originals across pairs within this queue.
+function createReviewImageLoader() {
+  const images = new Map();
+  return canvas => {
+    const key = canvas.dataset.photoId || canvas.dataset.imgUrl;
+    if (!images.has(key)) {
+      const pending = new Promise((resolve, reject) => {
+        const image = new Image();
+        image.crossOrigin = 'anonymous';
+        image.decoding = 'async';
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error('Could not load photo.'));
+        const mediaUrl = new URL(canvas.dataset.imgUrl, window.location.origin);
+        image.src = mediaUrl.origin === 'https://mambo-jambo-photo-api.surfersofindia.workers.dev' ? apiUrl(mediaUrl.pathname + mediaUrl.search) : mediaUrl.href;
+      });
+      images.set(key, pending);
+      pending.catch(() => images.delete(key));
+    }
+    return images.get(key);
+  };
+}
+async function drawCroppedFaceCanvas(canvas, loadImage) {
+  const card = canvas.closest('.verify-card');
+  const frame = canvas.closest('.review-image-frame');
+  frame.dataset.state = 'loading';
+  frame.setAttribute('aria-busy', 'true');
+  try {
+    const image = await loadImage(canvas);
     if (!canvas.isConnected) return;
     faceImages.set(canvas, image); renderFace(canvas); canvas.dataset.ready = 'true';
+    frame.dataset.state = 'ready';
     if ([...card.querySelectorAll('canvas')].every(item => item.dataset.ready === 'true')) {
       card.querySelector('.review-load-status').textContent = 'Compare the faces, then choose below.';
       card.querySelectorAll('[data-action="confirm"],[data-action="reject"],input[type=range]').forEach(control => { control.disabled = false; });
     }
-  };
-  image.onerror = () => { if (canvas.isConnected) card.querySelector('.review-load-status').textContent = 'A face could not load. Refresh the queue to renew the image links.'; };
-  image.src = canvas.dataset.imgUrl;
+  } catch {
+    if (!canvas.isConnected) return;
+    frame.dataset.state = 'error';
+    frame.querySelector('.review-image-label').textContent = 'Photo could not load';
+    card.querySelector('.review-load-status').textContent = 'A face could not load. Refresh the queue to try again.';
+  } finally {
+    frame.setAttribute('aria-busy', 'false');
+  }
+}
+let reviewObserver;
+let reviewQueueVersion = 0;
+function observeReviewImages(grid) {
+  const loadImage = createReviewImageLoader();
+  const loadCard = card => card.querySelectorAll('canvas').forEach(canvas => drawCroppedFaceCanvas(canvas, loadImage));
+  if (!('IntersectionObserver' in window)) {
+    grid.querySelectorAll('.verify-card').forEach(loadCard);
+    return;
+  }
+  reviewObserver = new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      reviewObserver.unobserve(entry.target);
+      loadCard(entry.target);
+    }
+  }, { rootMargin: '300px 0px' });
+  grid.querySelectorAll('.verify-card').forEach(card => reviewObserver.observe(card));
 }
 async function loadVerifyQueue() {
   const grid = document.getElementById('verifyGrid');
-  grid.innerHTML = '<p class="loading-msg">Looking for uncertain face pairs…</p>';
+  const version = ++reviewQueueVersion;
+  reviewObserver?.disconnect();
+  grid.innerHTML = '<p class="loading-msg review-queue-loading" role="status"><span class="review-spinner" aria-hidden="true"></span>Looking for uncertain face pairs…</p>';
   try {
     const { queue, stats } = await apiRequest('/api/admin/verify-queue');
+    if (version !== reviewQueueVersion) return;
     document.getElementById('verifyPending').textContent = stats.pending || 0;
     const unavailable = document.getElementById('reviewUnavailable');
     unavailable.hidden = !stats.unavailable;
@@ -636,13 +854,13 @@ async function loadVerifyQueue() {
       <article class="verify-card" id="verify-card-${escHtml(item.id)}">
         <div class="review-heading"><div><span class="eyebrow">A SECOND PAIR OF EYES</span><h3>Same person, different moment?</h3><p>${escHtml(item.sessionTitle)}</p></div><span class="review-score">Similarity ${item.similarityPct}%<small>Near the matching cutoff</small></span></div>
         <div class="verify-faces">${[item.photo1, item.photo2].map((photo, index) => `
-          <figure class="review-face"><figcaption>FACE ${index === 0 ? 'A' : 'B'}</figcaption><canvas class="face-crop-canvas" data-img-url="${escHtml(photo.url)}" data-bbox-norm="${escHtml(JSON.stringify(photo.bboxNorm))}" width="640" height="640" role="img" aria-label="Cropped face ${index === 0 ? 'A' : 'B'} for comparison"></canvas><p title="${escHtml(photo.filename)}">${escHtml(photo.filename)}</p></figure>`).join('')}</div>
+          <figure class="review-face"><figcaption>FACE ${index === 0 ? 'A' : 'B'}</figcaption><div class="review-image-frame" data-state="waiting" aria-busy="true"><div class="review-image-loader" aria-hidden="true"><span class="review-spinner"></span><span class="review-image-label">Loading face…</span></div><canvas class="face-crop-canvas" data-photo-id="${escHtml(photo.id)}" data-img-url="${escHtml(photo.url)}" data-bbox-norm="${escHtml(JSON.stringify(photo.bboxNorm))}" width="640" height="640" role="img" aria-label="Cropped face ${index === 0 ? 'A' : 'B'} for comparison"></canvas></div><p title="${escHtml(photo.filename)}">${escHtml(photo.filename)}</p></figure>`).join('')}</div>
         <div class="review-zoom"><label>Zoom both faces <input type="range" min="1" max="2.5" step=".1" value="1" disabled><output>1×</output></label><button type="button" data-action="reset-zoom">Reset</button></div>
         <p class="review-load-status" role="status">Loading isolated face crops…</p>
         <div class="verify-actions"><button class="confirm-btn" data-pair-id="${escHtml(item.id)}" data-action="confirm" disabled>✓ Same person</button><button class="reject-btn" data-pair-id="${escHtml(item.id)}" data-action="reject" disabled>✕ Different people</button><button class="review-skip" data-pair-id="${escHtml(item.id)}" data-action="skip">Not sure · skip</button></div>
       </article>`).join('');
-    grid.querySelectorAll('canvas').forEach(drawCroppedFaceCanvas);
-  } catch (error) { grid.innerHTML = `<p class="loading-msg error-msg">${escHtml(error.message)}</p>`; }
+    observeReviewImages(grid);
+  } catch (error) { if (version === reviewQueueVersion) grid.innerHTML = `<p class="loading-msg error-msg">${escHtml(error.message)}</p>`; }
 }
 const reviewGrid = document.getElementById('verifyGrid');
 reviewGrid.addEventListener('input', event => {

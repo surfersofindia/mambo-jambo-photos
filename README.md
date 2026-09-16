@@ -1,6 +1,6 @@
 # Mambo Jambo Photo Finder
 
-Surf-session discovery, consent-based selfie matching, watermarked previews, temporary favourites, and crew photo management. Payments and original-photo downloads are on hold. The Worker rejects checkout, payment verification, and webhook requests with HTTP 503; the guest site contains no checkout integration.
+Surf-session discovery, consent-based selfie matching, watermarked previews, temporary favourites, crew photo management, and Cashfree-powered checkout for original-photo downloads.
 
 ## Stack
 
@@ -24,7 +24,7 @@ Open http://127.0.0.1:4173. `config.js` currently points at the deployed API. It
 npx wrangler dev --var ALLOWED_ORIGIN:http://127.0.0.1:4173
 ```
 
-Set `apiUrl` in `config.js` to `http://127.0.0.1:8787` for this setup. Supply `ADMIN_PASSWORD` and `SESSION_SECRET` in an uncommitted `.dev.vars` file. Set `FACE_API_URL` to your face service's `/extract` endpoint. Do not use production passwords for local development.
+Set `apiUrl` in `config.js` to `http://127.0.0.1:8787` for this setup. Supply `ADMIN_PASSWORD`, `SESSION_SECRET`, `CASHFREE_APP_ID`, `CASHFREE_SECRET_KEY` and `CASHFREE_WEBHOOK_SECRET` in an uncommitted `.dev.vars` file. Set `FACE_API_URL` to your face service's `/extract` endpoint. Do not use production passwords for local development. Cashfree webhooks cannot reach localhost, so test the full paid flow against a deployed Worker (`CASHFREE_ENV=sandbox`) or a tunnel.
 
 Initialize a fresh local database:
 
@@ -45,7 +45,7 @@ The selfie is sent to the Worker and forwarded to the face service. The provided
 
 ## Crew flow
 
-Open `/admin.html` (or `/admin` on Vercel), sign in, create a session, upload images, and publish. The crew can manage sessions, inspect photos, reindex and review borderline face pairs. Prices are retained as future configuration only. Reviewing face pairs records a crew decision; those decisions are not currently applied to guest match scoring.
+Open `/admin.html` (or `/admin` on Vercel), sign in, create a session, upload images, and publish. The crew can manage sessions, inspect photos, reindex and review borderline face pairs, and set the photo-pack price guests pay to unlock originals. **Upload more** on a session card adds photos to a draft or published session; files whose names already exist in that session are listed first, and the crew chooses whether to replace the existing photos, upload only the new files, or keep both as numbered copies (`IMG_0412-2.jpg`). Reviewing face pairs records a crew decision; those decisions are not currently applied to guest match scoring.
 
 ## Database compatibility
 
@@ -66,15 +66,16 @@ npm test
 npx wrangler deploy --dry-run
 ```
 
-Tests cover matching with a mocked face service, deduplicated signed previews, original-photo isolation, authentication, session validation, streaming upload limits, CORS, the payment hold, and public build asset completeness. Browser and real-service end-to-end testing are still required before launch.
+Tests cover matching with a mocked face service, deduplicated signed previews, original-photo isolation, authentication, session validation, streaming upload limits, CORS, Cashfree checkout/verification/webhook handling (mocked), and public build asset completeness. Browser and real-service end-to-end testing are still required before launch.
 
 ## Deployment
 
-1. Verify D1 schema compatibility and private R2 storage.
-2. Configure Worker secrets `ADMIN_PASSWORD` and `SESSION_SECRET`, and variables `ALLOWED_ORIGIN`, `FACE_API_URL`, `MATCH_THRESHOLD`.
-3. Deploy the Worker with `npm run deploy:api`.
-4. Set the public `config.js` API URL, then deploy to Vercel, which runs the build and serves `dist/`. Deploy API and frontend together because matching now requires the consent field.
-5. Test upload → indexing → publication → consent → matching → previews on desktop and mobile, using consented test photos.
+1. Verify D1 schema compatibility and private R2 storage. Apply `migrations/0002_cashfree_payments.sql` if upgrading an existing database.
+2. Configure Worker secrets `ADMIN_PASSWORD`, `SESSION_SECRET`, `CASHFREE_APP_ID`, `CASHFREE_SECRET_KEY`, `CASHFREE_WEBHOOK_SECRET`, and variables `ALLOWED_ORIGIN`, `FACE_API_URL`, `MATCH_THRESHOLD`, `CASHFREE_ENV` (`sandbox` or `production`).
+3. In the Cashfree dashboard, point the webhook URL at `<worker-url>/api/payment/webhook` and copy its signing secret into `CASHFREE_WEBHOOK_SECRET`.
+4. Deploy the Worker with `npm run deploy:api`.
+5. Set the public `config.js` API URL, then deploy to Vercel, which runs the build and serves `dist/`. Deploy API and frontend together because matching now requires the consent field.
+6. Test upload → indexing → publication → consent → matching → previews → checkout → payment verification → unlocked originals on desktop and mobile, using consented test photos and Cashfree sandbox test cards/UPI.
 
 ## Outstanding launch validation
 
@@ -84,7 +85,7 @@ Tests cover matching with a mocked face service, deduplicated signed previews, o
 - Provider retention review, a working data-request contact, and a defined data cleanup schedule.
 - Backups, service monitoring, inference capacity and dependency/security review.
 
-Production website: https://mambo-jambo-photos.vercel.app. Payment enablement is a separate future task.
+Production website: https://photos.surfersofindia.com (also mirrored at https://mambo-jambo-photos.vercel.app).
 
 ## Durable photo indexing
 

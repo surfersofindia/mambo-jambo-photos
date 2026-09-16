@@ -17,9 +17,10 @@
     }
   ],
   "vars": {
-    "ALLOWED_ORIGIN": "https://mambo-jambo-photos.vercel.app",
+    "ALLOWED_ORIGIN": "https://mambo-jambo-photos.vercel.app,https://photos.surfersofindia.com",
     "MATCH_THRESHOLD": "0.62",
-    "FACE_API_URL": "https://ankitkotian-mambo-jambo-face-api.hf.space/extract"
+    "FACE_API_URL": "https://ankitkotian-mambo-jambo-face-api.hf.space/extract",
+    "CASHFREE_ENV": "sandbox"
   },
   "queues": {
     "producers": [

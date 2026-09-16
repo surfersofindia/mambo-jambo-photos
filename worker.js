@@ -2,8 +2,9 @@
  * Mambo Jambo photo API — Cloudflare Worker + D1 + R2.
  *
  * Secrets set with `wrangler secret put`:
- *   ADMIN_PASSWORD, SESSION_SECRET, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET,
- *   RAZORPAY_WEBHOOK_SECRET
+ *   ADMIN_PASSWORD, SESSION_SECRET, CASHFREE_APP_ID, CASHFREE_SECRET_KEY,
+ *   CASHFREE_WEBHOOK_SECRET
+ * Vars: CASHFREE_ENV ('sandbox' or 'production', defaults to 'sandbox')
  */
 
 const encoder = new TextEncoder();
@@ -85,6 +86,11 @@ async function hmac(value, secret) {
   const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(value));
   return Array.from(new Uint8Array(signature)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
+async function hmacBase64(value, secret) {
+  const key = await crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(value));
+  return btoa(String.fromCharCode(...new Uint8Array(signature)));
+}
 function same(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string' || !a || !b || a.length !== b.length) return false;
   let result = 0;
@@ -119,6 +125,13 @@ async function requireSearch(request, env, searchId) {
 function safeFilename(filename) {
   return (filename || 'photo.jpg').replace(/[^a-zA-Z0-9._-]/g, '-').slice(-120);
 }
+const DUPLICATE_MODES = ['replace', 'skip', 'rename'];
+// Append -2, -3, … before the extension until the name is unused in the session.
+function uniqueFilename(filename, taken) {
+  const dot = filename.lastIndexOf('.');
+  const base = dot > 0 ? filename.slice(0, dot) : filename; const ext = dot > 0 ? filename.slice(dot) : '';
+  for (let n = 2; ; n += 1) { const candidate = `${base}-${n}${ext}`; if (!taken.has(candidate.toLowerCase())) return candidate; }
+}
 function similarity(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return -1;
   let dot = 0; let aa = 0; let bb = 0;
@@ -138,14 +151,30 @@ async function accessPayload(search, request, env) {
     url: `${base}/api/media/${photoId}?variant=original&token=${encodeURIComponent(await mediaToken(photoId, 'original', env))}`,
   })));
 }
-async function razorpayOrder(search, env) {
-  const credentials = btoa(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`);
-  const result = await fetch('https://api.razorpay.com/v1/orders', {
+function cashfreeBase(env) {
+  return env.CASHFREE_ENV === 'production' ? 'https://api.cashfree.com/pg' : 'https://sandbox.cashfree.com/pg';
+}
+function cashfreeHeaders(env) {
+  return { 'x-client-id': env.CASHFREE_APP_ID, 'x-client-secret': env.CASHFREE_SECRET_KEY, 'x-api-version': '2023-08-01', 'content-type': 'application/json' };
+}
+async function cashfreeOrder(search, paymentId, customer, siteOrigin, workerOrigin, env) {
+  const result = await fetch(`${cashfreeBase(env)}/orders`, {
     method: 'POST',
-    headers: { authorization: `Basic ${credentials}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ amount: search.price_paise, currency: search.currency, receipt: `mj_${search.id.slice(0, 28)}`, notes: { search_id: search.id } }),
+    headers: cashfreeHeaders(env),
+    body: JSON.stringify({
+      order_id: `mj-${paymentId}`,
+      order_amount: Number((search.price_paise / 100).toFixed(2)),
+      order_currency: search.currency,
+      customer_details: { customer_id: `guest-${search.id}`, customer_phone: customer.phone, ...(customer.email ? { customer_email: customer.email } : {}) },
+      order_meta: { return_url: `${siteOrigin}/?cfOrder={order_id}`, notify_url: `${workerOrigin}/api/payment/webhook` },
+    }),
   });
-  if (!result.ok) throw new Error('Razorpay could not create an order. Check your live/test keys.');
+  if (!result.ok) throw new Error('Cashfree could not create an order. Check your live/test keys.');
+  return result.json();
+}
+async function cashfreeOrderStatus(orderId, env) {
+  const result = await fetch(`${cashfreeBase(env)}/orders/${encodeURIComponent(orderId)}`, { headers: cashfreeHeaders(env) });
+  if (!result.ok) return null;
   return result.json();
 }
 
@@ -254,11 +283,6 @@ export default {
       if (request.method === 'OPTIONS') return new Response(null, { headers: cors(request, env) });
       if (!url.pathname.startsWith('/api/')) return error('Not found', request, env, 404);
 
-      // Checkout stays unavailable until a separate payment launch.
-      if (url.pathname === '/api/checkout' || url.pathname.startsWith('/api/payment/')) {
-        return error('Payments are currently on hold.', request, env, 503);
-      }
-
       if (request.method === 'POST' && url.pathname === '/api/admin/login') {
         const { password } = await readJson(request);
         if (!env.ADMIN_PASSWORD || !same(password, env.ADMIN_PASSWORD)) return error('Incorrect password.', request, env, 401);
@@ -336,28 +360,39 @@ export default {
       }
 
       if (request.method === 'POST' && url.pathname === '/api/checkout') {
-        const { searchId, token } = await readJson(request);
+        const { searchId, token, phone, email } = await readJson(request);
         const payload = await verify(token, env);
         if (payload?.scope !== 'search' || payload.searchId !== searchId) return error('This gallery link has expired.', request, env, 401);
+        if (typeof phone !== 'string' || !/^[6-9]\d{9}$/.test(phone)) return error('Enter a valid 10-digit mobile number.', request, env);
+        if (email !== undefined && email !== '' && (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) return error('Enter a valid email address.', request, env);
         const search = await env.DB.prepare("SELECT * FROM searches WHERE id = ? AND status = 'preview' AND expires_at > CURRENT_TIMESTAMP").bind(searchId).first();
         if (!search) return error('This gallery link has expired.', request, env, 410);
-        if (!env.RAZORPAY_KEY_ID || !env.RAZORPAY_KEY_SECRET) return error('Payments are not configured yet.', request, env, 503);
-        const order = await razorpayOrder(search, env);
-        await env.DB.prepare('INSERT INTO payments (id, search_id, razorpay_order_id, amount_paise, currency) VALUES (?, ?, ?, ?, ?)')
-          .bind(id(), searchId, order.id, search.price_paise, search.currency).run();
-        return response({ orderId: order.id, keyId: env.RAZORPAY_KEY_ID, amount: order.amount, currency: order.currency, name: 'Mambo Jambo Surf School', description: `${search.title || 'Surf'} photo pack` }, request, env);
+        if (!env.CASHFREE_APP_ID || !env.CASHFREE_SECRET_KEY) return error('Payments are not configured yet.', request, env, 503);
+        const allowedOrigins = (env.ALLOWED_ORIGIN || '').split(',').map(value => value.trim()).filter(Boolean);
+        const requestOrigin = request.headers.get('Origin');
+        const siteOrigin = (requestOrigin && allowedOrigins.includes(requestOrigin)) ? requestOrigin : (allowedOrigins[0] || url.origin);
+        const paymentId = id();
+        const order = await cashfreeOrder(search, paymentId, { phone, email }, siteOrigin, url.origin, env);
+        await env.DB.prepare('INSERT INTO payments (id, search_id, cashfree_order_id, amount_paise, currency) VALUES (?, ?, ?, ?, ?)')
+          .bind(paymentId, searchId, order.order_id, search.price_paise, search.currency).run();
+        return response({ orderId: order.order_id, paymentSessionId: order.payment_session_id, mode: env.CASHFREE_ENV === 'production' ? 'production' : 'sandbox', amount: search.price_paise / 100, currency: search.currency }, request, env);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/payment/verify') {
-        const { searchId, token, razorpay_payment_id: paymentId, razorpay_order_id: orderId, razorpay_signature: signature } = await readJson(request);
+        const { searchId, token, orderId } = await readJson(request);
         const payload = await verify(token, env);
         if (payload?.scope !== 'search' || payload.searchId !== searchId) return error('This gallery link has expired.', request, env, 401);
-        const payment = await env.DB.prepare('SELECT * FROM payments WHERE razorpay_order_id = ? AND search_id = ?').bind(orderId, searchId).first();
-        if (!payment || !same(await hmac(`${payment.razorpay_order_id}|${paymentId}`, env.RAZORPAY_KEY_SECRET), signature)) return error('Payment verification failed.', request, env, 402);
-        await env.DB.batch([
-          env.DB.prepare("UPDATE payments SET razorpay_payment_id = ?, status = 'verified', paid_at = CURRENT_TIMESTAMP WHERE id = ?").bind(paymentId, payment.id),
-          env.DB.prepare("UPDATE searches SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE id = ?").bind(searchId),
-        ]);
+        const payment = await env.DB.prepare('SELECT * FROM payments WHERE cashfree_order_id = ? AND search_id = ?').bind(orderId, searchId).first();
+        if (!payment) return error('Payment verification failed.', request, env, 402);
+        if (!['verified', 'captured'].includes(payment.status)) {
+          if (!env.CASHFREE_APP_ID || !env.CASHFREE_SECRET_KEY) return error('Payments are not configured yet.', request, env, 503);
+          const orderStatus = await cashfreeOrderStatus(orderId, env);
+          if (orderStatus?.order_status !== 'PAID') return error('Payment has not been confirmed yet.', request, env, 402);
+          await env.DB.batch([
+            env.DB.prepare("UPDATE payments SET status = 'verified', paid_at = CURRENT_TIMESTAMP WHERE id = ?").bind(payment.id),
+            env.DB.prepare("UPDATE searches SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE id = ?").bind(searchId),
+          ]);
+        }
         const search = await env.DB.prepare('SELECT * FROM searches WHERE id = ?').bind(searchId).first();
         return response({ unlocked: true, photos: await accessPayload(search, request, env) }, request, env);
       }
@@ -620,20 +655,38 @@ export default {
       if (request.method === 'POST' && upload) {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
         if (!env.INDEX_QUEUE) return error('Photo processing is not configured.', request, env, 503);
-        const sessionId = upload[1]; const session = await env.DB.prepare("SELECT id FROM sessions WHERE id = ? AND status = 'draft'").bind(sessionId).first();
-        if (!session) return error('Create a draft session before uploading.', request, env, 404);
+        const sessionId = upload[1]; const session = await env.DB.prepare('SELECT id, status FROM sessions WHERE id = ?').bind(sessionId).first();
+        if (!session) return error('Session not found. Create a session before uploading.', request, env, 404);
+        if (session.status === 'archived') return error('Restore this archived session before uploading more photos.', request, env, 409);
         const form = await readForm(request, 32 * 1024 * 1024); const file = form.get('file'); const preview = form.get('preview');
         if (!(file instanceof File) || !(preview instanceof File) || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || preview.type !== 'image/jpeg' || !file.size || file.size > 25 * 1024 * 1024 || !preview.size || preview.size > 5 * 1024 * 1024) return error('An image and its preview are required.', request, env);
-        const photoId = id(); const filename = safeFilename(file.name); const objectKey = `sessions/${sessionId}/original/${photoId}-${filename}`; const previewKey = `sessions/${sessionId}/preview/${photoId}.jpg`;
+        // onDuplicate decides what happens when this session already holds a photo with the same name.
+        const onDuplicate = form.get('onDuplicate');
+        if (onDuplicate !== null && !DUPLICATE_MODES.includes(onDuplicate)) return error('Choose replace, skip or rename for duplicate photos.', request, env);
+        let filename = safeFilename(file.name); let duplicates = [];
+        if (onDuplicate) {
+          duplicates = (await env.DB.prepare('SELECT id, object_key, preview_key FROM photos WHERE session_id = ? AND filename = ? COLLATE NOCASE').bind(sessionId, filename).all()).results;
+          if (duplicates.length && onDuplicate === 'skip') return response({ skipped: true, filename }, request, env);
+          if (duplicates.length && onDuplicate === 'rename') {
+            const taken = new Set((await env.DB.prepare('SELECT filename FROM photos WHERE session_id = ?').bind(sessionId).all()).results.map(row => row.filename.toLowerCase()));
+            filename = uniqueFilename(filename, taken);
+          }
+        }
+        const photoId = id(); const objectKey = `sessions/${sessionId}/original/${photoId}-${filename}`; const previewKey = `sessions/${sessionId}/preview/${photoId}.jpg`;
         await Promise.all([
           env.PHOTOS.put(objectKey, file, { httpMetadata: { contentType: file.type } }),
           env.PHOTOS.put(previewKey, preview, { httpMetadata: { contentType: 'image/jpeg' } }),
         ]);
         await env.DB.prepare("INSERT INTO photos (id, session_id, object_key, preview_key, filename, content_type, indexing_status) VALUES (?, ?, ?, ?, ?, ?, 'pending')").bind(photoId, sessionId, objectKey, previewKey, filename, file.type).run();
+        if (duplicates.length && onDuplicate === 'replace') {
+          // Remove the old rows before their files so a failed delete never leaves a photo pointing at missing media.
+          await env.DB.batch(duplicates.flatMap(photo => [env.DB.prepare('DELETE FROM faces WHERE photo_id = ?').bind(photo.id), env.DB.prepare('DELETE FROM photos WHERE id = ?').bind(photo.id)]));
+          await Promise.all(duplicates.flatMap(photo => [env.PHOTOS.delete(photo.object_key), env.PHOTOS.delete(photo.preview_key)]));
+        }
 
         const processing = await enqueuePhotos([{ id: photoId }], env);
 
-        return response({ photoId, status: processing.failed ? 'failed' : 'pending' }, request, env, 201);
+        return response({ photoId, filename, status: processing.failed ? 'failed' : 'pending', duplicate: duplicates.length ? (onDuplicate === 'replace' ? 'replaced' : 'renamed') : null, replaced: onDuplicate === 'replace' ? duplicates.length : 0 }, request, env, 201);
       }
 
       const publish = url.pathname.match(/^\/api\/admin\/sessions\/([\w-]+)\/publish$/);
@@ -646,13 +699,19 @@ export default {
       }
 
       if (request.method === 'POST' && url.pathname === '/api/payment/webhook') {
-        const raw = await request.text(); const signature = request.headers.get('x-razorpay-signature');
-        if (!env.RAZORPAY_WEBHOOK_SECRET || !same(await hmac(raw, env.RAZORPAY_WEBHOOK_SECRET), signature)) return error('Invalid webhook signature.', request, env, 401);
+        const raw = await request.text();
+        const signature = request.headers.get('x-webhook-signature');
+        const timestamp = request.headers.get('x-webhook-timestamp');
+        if (!env.CASHFREE_WEBHOOK_SECRET || !timestamp || !signature || !same(await hmacBase64(`${timestamp}${raw}`, env.CASHFREE_WEBHOOK_SECRET), signature)) return error('Invalid webhook signature.', request, env, 401);
         const event = JSON.parse(raw);
-        if (['payment.captured', 'order.paid'].includes(event.event)) {
-          const entity = event.payload?.payment?.entity || event.payload?.order?.entity;
-          const orderId = entity?.order_id || entity?.id;
-          if (orderId) await env.DB.prepare("UPDATE payments SET status = 'captured', paid_at = CURRENT_TIMESTAMP WHERE razorpay_order_id = ?").bind(orderId).run();
+        if (event.type === 'PAYMENT_SUCCESS_WEBHOOK') {
+          const orderId = event.data?.order?.order_id;
+          const cfPaymentId = event.data?.payment?.cf_payment_id;
+          if (orderId) {
+            await env.DB.prepare("UPDATE payments SET cashfree_payment_id = COALESCE(?, cashfree_payment_id), status = 'captured', paid_at = CURRENT_TIMESTAMP WHERE cashfree_order_id = ?").bind(cfPaymentId ? String(cfPaymentId) : null, orderId).run();
+            const payment = await env.DB.prepare('SELECT search_id FROM payments WHERE cashfree_order_id = ?').bind(orderId).first();
+            if (payment) await env.DB.prepare("UPDATE searches SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE id = ? AND status != 'paid'").bind(payment.search_id).run();
+          }
         }
         return response({ received: true }, request, env);
       }

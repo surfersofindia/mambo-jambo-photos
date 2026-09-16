@@ -3,6 +3,7 @@ const $ = (selector) => document.querySelector(selector);
 const apiBase = (window.MJ_CONFIG?.apiUrl || '').replace(/\/$/, '');
 let selectedSessionId = '';
 let sessions = [], selectedFile = null, previewUrl = null, photos = [], favourites = new Set(), favouritesOnly = false, photoIndex = 0, searchController = null;
+let currentSearch = null, unlocked = false, paying = false;
 const status = (message = '', error = false) => { $('#finderStatus').textContent = message; $('#finderStatus').classList.toggle('error', error); };
 async function requestApi(path, options = {}) {
   if (!apiBase) throw new Error('Photo search is not available yet. Please check back soon.');
@@ -78,7 +79,7 @@ async function loadSessions() {
     if (!sessions.length) { $('#sessionChoices').textContent = 'Your next surf session will appear here once the crew publishes it.'; $('#sessionCards').textContent = 'The next batch of memories is on its way. Check back after your session.'; status('Your crew hasn’t published any sessions yet. Check back soon.'); return; }
     for (const session of sessions.slice(0, 3)) {
       const button = document.createElement('button'); button.className = 'session-card'; button.type = 'button';
-      const img = document.createElement('img'); img.src = 'assets/mambo-jambo-surf-session.jpg'; img.alt = 'Mambo Jambo surf school — illustrative session photo'; img.loading = 'lazy';
+      const img = document.createElement('img'); img.src = 'assets/soi-waves.svg'; img.alt = 'Surfers of India — illustrated waves'; img.loading = 'lazy';
       const date = document.createElement('small'); date.textContent = dateLabel(session.session_date).toUpperCase();
       const title = document.createElement('h3'); title.textContent = `${session.title} ↗`;
       const location = document.createElement('p'); location.textContent = `${session.location} · Find your photos`;
@@ -137,13 +138,69 @@ $('#searchForm').addEventListener('submit', async (event) => {
       return { ...photo, url: url.href };
     });
     favourites.clear(); favouritesOnly = false; $('#favouritesFilter').setAttribute('aria-pressed', 'false');
+    unlocked = false;
+    currentSearch = (match.searchId && match.token) ? { searchId: match.searchId, token: match.token, pricePaise: match.pricePaise, currency: match.currency } : null;
     $('#resultsMeta').textContent = `${dateLabel(match.session.date)} · ${match.session.location} · ${match.session.title}`;
     $('#resultsTitle').textContent = photos.length ? `${photos.length} moments. All yours.` : 'No matches this time.';
     $('#resultsCopy').textContent = photos.length ? 'A little salt, a little sunshine, and you. Tap a photo for a closer look.' : 'Try a brighter selfie without sunglasses, or check that you chose the right session.';
     $('#indexingBanner').textContent = match.indexingNote || ''; $('#indexingBanner').hidden = !match.indexingNote;
+    updateCheckoutPanel();
     renderGallery(); $('#main').hidden = true; $('#results').hidden = false; stage('selfie'); window.scrollTo(0, 0); $('#resultsTitle').focus();
   } catch (error) { stage('selfie'); status(error.name === 'AbortError' ? (timedOut ? 'The search took too long. Please try again.' : 'Search cancelled. You can try again when you’re ready.') : error.message, error.name !== 'AbortError' || timedOut); }
   finally { clearTimeout(timeout); searchController = null; }
+});
+function formatRupees(paise, currency) {
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: currency || 'INR', maximumFractionDigits: 0 }).format((paise || 0) / 100);
+}
+function checkoutStatusMsg(message = '', error = false) { $('#checkoutStatus').textContent = message; $('#checkoutStatus').classList.toggle('error', error); }
+function updateCheckoutPanel() {
+  const canUnlock = photos.length > 0 && Number(currentSearch?.pricePaise) > 0;
+  $('#unlockButton').hidden = !canUnlock || unlocked;
+  $('#checkoutNotice').hidden = unlocked;
+  $('#unlockedNotice').hidden = !unlocked;
+  if (currentSearch?.pricePaise) {
+    const amount = formatRupees(currentSearch.pricePaise, currentSearch.currency);
+    $('#unlockPrice').textContent = amount; $('#payAmount').textContent = amount;
+  }
+}
+function applyUnlockedPhotos(unlockedPhotos) {
+  const valid = unlockedPhotos.filter(photo => photo?.photoId && photo?.url);
+  if (photos.length) {
+    const byId = new Map(valid.map(photo => [photo.photoId, photo.url]));
+    photos = photos.map(photo => ({ ...photo, url: byId.get(photo.photoId) || photo.url }));
+  } else {
+    photos = valid.map(photo => ({ photoId: photo.photoId, url: photo.url }));
+  }
+  unlocked = true;
+  updateCheckoutPanel(); renderGallery();
+}
+async function confirmPayment(orderId) {
+  const result = await requestApi('/api/payment/verify', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ searchId: currentSearch.searchId, token: currentSearch.token, orderId }) });
+  if (!Array.isArray(result.photos)) throw new Error('Payment confirmed, but photos could not be loaded. Contact the crew with your payment details.');
+  applyUnlockedPhotos(result.photos);
+  sessionStorage.removeItem('mjCheckout');
+}
+$('#unlockButton').addEventListener('click', () => { checkoutStatusMsg(); $('#checkoutDialog').showModal(); });
+$('#cancelCheckout').addEventListener('click', () => $('#checkoutDialog').close());
+$('#checkoutForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (paying || !currentSearch) return;
+  const phone = $('#checkoutPhone').value.trim();
+  const email = $('#checkoutEmail').value.trim();
+  if (!/^[6-9]\d{9}$/.test(phone)) { checkoutStatusMsg('Enter a valid 10-digit mobile number.', true); return; }
+  paying = true; $('#payButton').disabled = true; checkoutStatusMsg('Creating your payment…');
+  try {
+    const order = await requestApi('/api/checkout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ searchId: currentSearch.searchId, token: currentSearch.token, phone, email: email || undefined }) });
+    if (!order.paymentSessionId || !window.Cashfree) throw new Error('Payment could not start. Please refresh and try again.');
+    sessionStorage.setItem('mjCheckout', JSON.stringify({ searchId: currentSearch.searchId, token: currentSearch.token }));
+    const cashfree = window.Cashfree({ mode: order.mode === 'production' ? 'production' : 'sandbox' });
+    const result = await cashfree.checkout({ paymentSessionId: order.paymentSessionId, redirectTarget: '_modal' });
+    if (result?.error) { checkoutStatusMsg('Payment was not completed. You can try again.', true); return; }
+    checkoutStatusMsg('Confirming your payment…');
+    await confirmPayment(order.orderId);
+    $('#checkoutDialog').close();
+  } catch (error) { checkoutStatusMsg(error.message, true); }
+  finally { paying = false; $('#payButton').disabled = false; }
 });
 function renderGallery() {
   $('#gallery').replaceChildren(); $('#favouriteCount').textContent = favourites.size;
@@ -157,7 +214,7 @@ function renderGallery() {
     open.append(img); open.addEventListener('click', () => openPhoto(index));
     const favourite = document.createElement('button'); favourite.className = 'favourite'; favourite.textContent = favourites.has(index) ? '♥' : '♡'; favourite.setAttribute('aria-label', `Favourite photo ${index + 1}`); favourite.setAttribute('aria-pressed', String(favourites.has(index))); favourite.dataset.index = index;
     favourite.addEventListener('click', () => { favourites.has(index) ? favourites.delete(index) : favourites.add(index); renderGallery(); ($('#gallery').querySelector(`[data-index="${index}"]`) || $('#favouritesFilter')).focus(); });
-    const caption = document.createElement('figcaption'); caption.textContent = `MOMENT ${String(index + 1).padStart(2, '0')} · PREVIEW`;
+    const caption = document.createElement('figcaption'); caption.textContent = `MOMENT ${String(index + 1).padStart(2, '0')} · ${unlocked ? 'ORIGINAL' : 'PREVIEW'}`;
     figure.append(open, favourite, caption); $('#gallery').append(figure);
   });
 }
@@ -170,4 +227,22 @@ function returnToSearch() { $('#results').hidden = true; $('#main').hidden = fal
 $('#backHome').addEventListener('click', returnToSearch);
 document.querySelectorAll('a[href^="#"]').forEach(link => link.addEventListener('click', () => { searchController?.abort(); $('#main').hidden = false; $('#results').hidden = true; }));
 window.addEventListener('pagehide', event => { if (!event.persisted && previewUrl) URL.revokeObjectURL(previewUrl); searchController?.abort(); });
+async function resumeCheckoutFromRedirect() {
+  const orderId = new URLSearchParams(location.search).get('cfOrder');
+  if (!orderId) return;
+  history.replaceState(null, '', location.pathname + location.hash);
+  const stored = sessionStorage.getItem('mjCheckout');
+  if (!stored) return;
+  try {
+    const { searchId, token } = JSON.parse(stored);
+    if (!searchId || !token) return;
+    currentSearch = { searchId, token };
+    photos = [];
+    $('#resultsMeta').textContent = ''; $('#resultsTitle').textContent = 'Confirming your payment…'; $('#resultsCopy').textContent = '';
+    $('#main').hidden = true; $('#results').hidden = false; window.scrollTo(0, 0);
+    await confirmPayment(orderId);
+    $('#resultsTitle').textContent = 'Payment received.'; $('#resultsCopy').textContent = 'These are your original, watermark-free photos.';
+  } catch (error) { $('#resultsCopy').textContent = error.message; }
+}
+resumeCheckoutFromRedirect();
 loadSessions();

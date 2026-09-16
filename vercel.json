@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/api/:path*",
+      "destination": "https://mambo-jambo-photo-api.surfersofindia.workers.dev/api/:path*"
+    },
+    {
       "source": "/admin",
       "destination": "/admin.html"
     }

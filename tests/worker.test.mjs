@@ -1,13 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { createHmac } from 'node:crypto';
 const source = await readFile(new URL('../worker.js', import.meta.url), 'utf8');
 const { default: worker } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 const request = (path, options) => new Request(`https://example.com${path}`, options);
-test('all payment endpoints are on hold without touching payment providers', async () => {
+const jsonRequest = (path, body, options = {}) => request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), ...options });
+test('payment endpoints reject malformed requests without touching payment providers', async () => {
   for (const path of ['/api/checkout', '/api/payment/verify', '/api/payment/webhook']) {
-    const response = await worker.fetch(request(path, { method: 'POST' }), {}, {});
-    assert.equal(response.status, 503); assert.match((await response.json()).error, /on hold/);
+    const response = await worker.fetch(jsonRequest(path, {}), {}, {});
+    assert.equal(response.status, 401);
     assert.equal(response.headers.get('cache-control'), 'no-store');
   }
 });
@@ -136,4 +138,175 @@ test('browser-style mixed-case multipart boundaries preserve selfie fields', asy
   const env = { DB: { prepare() { return { bind(id) { assert.equal(id, 'session-1'); return this; }, async first() { sessionLookup = true; return null; } }; } } };
   const result = await worker.fetch(request('/api/match', { method: 'POST', body, headers: { 'content-type': `multipart/form-data; boundary=${boundary}` } }), env, {});
   assert.equal(sessionLookup, true); assert.equal(result.status, 404);
+});
+async function getMatch(context) {
+  const { env } = matchingEnv();
+  context.mock.method(globalThis, 'fetch', async () => Response.json([{ embedding: [1, 0] }]));
+  const result = await worker.fetch(request('/api/match', { method: 'POST', body: selfieForm(true) }), env, {});
+  return result.json();
+}
+test('checkout rejects an invalid phone number before touching the database or Cashfree', async context => {
+  const match = await getMatch(context);
+  const env = { ...secrets, DB: { prepare: () => { throw new Error('DB should not be queried'); } } };
+  const result = await worker.fetch(jsonRequest('/api/checkout', { searchId: match.searchId, token: match.token, phone: '12345' }), env, {});
+  assert.equal(result.status, 400); assert.match((await result.json()).error, /mobile/);
+});
+function checkoutDb(match, extra = {}) {
+  return { prepare(sql) { return { values: [], bind(...values) { this.values = values; return this; },
+    async first() {
+      if (sql.includes('FROM searches WHERE id')) return { id: match.searchId, session_id: 'session-1', price_paise: 29900, currency: 'INR', status: 'preview' };
+      if (extra.first) return extra.first(sql);
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+    async run() { if (extra.run) extra.run(sql, this.values); return { meta: { changes: 1 } }; },
+  }; } };
+}
+test('checkout requires Cashfree credentials before creating an order', async context => {
+  const match = await getMatch(context);
+  const env = { ...secrets, DB: checkoutDb(match) };
+  const result = await worker.fetch(jsonRequest('/api/checkout', { searchId: match.searchId, token: match.token, phone: '9876543210' }), env, {});
+  assert.equal(result.status, 503);
+});
+test('checkout creates a Cashfree order in rupees and records the payment', async context => {
+  const match = await getMatch(context);
+  const inserts = [];
+  const env = { ...secrets, CASHFREE_APP_ID: 'test-app', CASHFREE_SECRET_KEY: 'test-secret', ALLOWED_ORIGIN: 'https://site.example',
+    DB: checkoutDb(match, { run: (sql, values) => { assert.match(sql, /INSERT INTO payments/); inserts.push(values); } }) };
+  context.mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.match(String(url), /\/pg\/orders$/);
+    const body = JSON.parse(options.body);
+    assert.equal(body.order_amount, 299);
+    assert.equal(body.order_currency, 'INR');
+    assert.equal(body.customer_details.customer_phone, '9876543210');
+    return Response.json({ order_id: 'mj-test-order', payment_session_id: 'session_abc123' });
+  });
+  const result = await worker.fetch(jsonRequest('/api/checkout', { searchId: match.searchId, token: match.token, phone: '9876543210' }), env, {});
+  assert.equal(result.status, 200);
+  const body = await result.json();
+  assert.equal(body.orderId, 'mj-test-order'); assert.equal(body.paymentSessionId, 'session_abc123'); assert.equal(body.mode, 'sandbox');
+  assert.equal(inserts.length, 1); assert.equal(inserts[0][2], 'mj-test-order');
+});
+test('payment verification confirms order status with Cashfree before unlocking', async context => {
+  const match = await getMatch(context);
+  const env = {
+    ...secrets, CASHFREE_APP_ID: 'test-app', CASHFREE_SECRET_KEY: 'test-secret',
+    DB: { prepare(sql) {
+      return {
+        bind() { return this; },
+        async first() {
+          if (sql.includes('FROM payments WHERE cashfree_order_id')) return { id: 'payment-1', status: 'created' };
+          throw new Error(`Unexpected query: ${sql}`);
+        },
+      };
+    } },
+  };
+  context.mock.method(globalThis, 'fetch', async () => Response.json({ order_status: 'ACTIVE' }));
+  const result = await worker.fetch(jsonRequest('/api/payment/verify', { searchId: match.searchId, token: match.token, orderId: 'mj-test-order' }), env, {});
+  assert.equal(result.status, 402);
+});
+test('webhook rejects an invalid signature without touching the database', async () => {
+  const env = { CASHFREE_WEBHOOK_SECRET: 'whsec', DB: { prepare: () => { throw new Error('DB should not be queried'); } } };
+  const result = await worker.fetch(request('/api/payment/webhook', { method: 'POST', headers: { 'x-webhook-signature': 'bad', 'x-webhook-timestamp': '123' }, body: '{}' }), env, {});
+  assert.equal(result.status, 401);
+});
+test('a validly signed webhook marks the payment captured and the search paid', async () => {
+  const secret = 'whsec';
+  const timestamp = String(Date.now());
+  const payload = JSON.stringify({ type: 'PAYMENT_SUCCESS_WEBHOOK', data: { order: { order_id: 'mj-test-order' }, payment: { cf_payment_id: 555 } } });
+  const signature = createHmac('sha256', secret).update(`${timestamp}${payload}`).digest('base64');
+  const updates = [];
+  const env = { CASHFREE_WEBHOOK_SECRET: secret, DB: { prepare(sql) { return { bind(...values) { this.values = values; return this; },
+    async run() { updates.push(sql); return {}; },
+    async first() { if (sql.includes('SELECT search_id FROM payments')) return { search_id: 'search-1' }; throw new Error(`Unexpected query: ${sql}`); },
+  }; } } };
+  const result = await worker.fetch(request('/api/payment/webhook', { method: 'POST', headers: { 'x-webhook-signature': signature, 'x-webhook-timestamp': timestamp }, body: payload }), env, {});
+  assert.equal(result.status, 200); assert.equal((await result.json()).received, true);
+  assert.equal(updates.some(sql => sql.includes('UPDATE payments')), true);
+  assert.equal(updates.some(sql => sql.includes("UPDATE searches SET status = 'paid'")), true);
+});
+// ── Upload more: duplicate handling ──────────────────────────────────────────
+function photoUpload(token, sessionId, name, onDuplicate) {
+  const form = new FormData();
+  form.append('file', new Blob(['original'], { type: 'image/jpeg' }), name);
+  form.append('preview', new Blob(['preview'], { type: 'image/jpeg' }), 'preview.jpg');
+  if (onDuplicate) form.append('onDuplicate', onDuplicate);
+  return request(`/api/admin/sessions/${sessionId}/photos`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
+}
+// Simulates a session that already holds IMG_0412.jpg (and, optionally, its -2 copy).
+function uploadEnv({ status = 'published', existing = [{ id: 'photo-old', filename: 'IMG_0412.jpg', object_key: 'original/old', preview_key: 'preview/old' }] } = {}) {
+  const puts = []; const deletes = []; const inserts = []; const deletedRows = []; const queued = [];
+  const statement = sql => ({ values: [], bind(...values) { this.values = values; return this; },
+    async first() {
+      if (sql.includes('FROM sessions WHERE id')) return { id: 'session-1', status };
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+    async all() {
+      if (sql.includes('COLLATE NOCASE')) return { results: existing.filter(photo => photo.filename.toLowerCase() === String(this.values[1]).toLowerCase()) };
+      if (sql.includes('SELECT filename FROM photos')) return { results: existing.map(photo => ({ filename: photo.filename })) };
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+    async run() {
+      if (sql.includes('INSERT INTO photos')) inserts.push(this.values);
+      if (sql.includes('DELETE FROM')) deletedRows.push(sql);
+      return { meta: { changes: 1 } };
+    },
+    sql,
+  });
+  const env = { ...secrets, INDEX_QUEUE: { async send(message) { queued.push(message); } },
+    DB: { prepare: statement, async batch(statements) { statements.forEach(item => deletedRows.push(item.sql)); return []; } },
+    PHOTOS: { async put(key) { puts.push(key); }, async delete(key) { deletes.push(key); } } };
+  return { env, puts, deletes, inserts, deletedRows, queued };
+}
+test('photos can be added to a published session but not an archived one', async () => {
+  const token = await login();
+  const open = uploadEnv({ status: 'published', existing: [] });
+  const added = await worker.fetch(photoUpload(token, 'session-1', 'IMG_0500.jpg'), open.env, {});
+  assert.equal(added.status, 201); assert.equal(open.inserts.length, 1); assert.equal(open.queued.length, 1);
+  const archived = uploadEnv({ status: 'archived' });
+  const refused = await worker.fetch(photoUpload(token, 'session-1', 'IMG_0500.jpg'), archived.env, {});
+  assert.equal(refused.status, 409); assert.equal(archived.puts.length, 0);
+});
+test('uploads reject unknown duplicate modes before storing anything', async () => {
+  const token = await login();
+  const { env, puts } = uploadEnv();
+  const result = await worker.fetch(photoUpload(token, 'session-1', 'IMG_0412.jpg', 'overwrite'), env, {});
+  assert.equal(result.status, 400); assert.equal(puts.length, 0);
+});
+test('skip mode leaves the existing photo untouched and stores nothing', async () => {
+  const token = await login();
+  const { env, puts, inserts, queued } = uploadEnv();
+  const result = await worker.fetch(photoUpload(token, 'session-1', 'img_0412.JPG', 'skip'), env, {});
+  assert.equal(result.status, 200); assert.deepEqual(await result.json(), { skipped: true, filename: 'img_0412.JPG' });
+  assert.equal(puts.length, 0); assert.equal(inserts.length, 0); assert.equal(queued.length, 0);
+});
+test('rename mode stores a numbered copy that avoids every name already in the session', async () => {
+  const token = await login();
+  const { env, inserts } = uploadEnv({ existing: [
+    { id: 'photo-old', filename: 'IMG_0412.jpg', object_key: 'original/old', preview_key: 'preview/old' },
+    { id: 'photo-copy', filename: 'img_0412-2.jpg', object_key: 'original/copy', preview_key: 'preview/copy' },
+  ] });
+  const result = await worker.fetch(photoUpload(token, 'session-1', 'IMG_0412.jpg', 'rename'), env, {});
+  assert.equal(result.status, 201);
+  const body = await result.json();
+  assert.equal(body.filename, 'IMG_0412-3.jpg'); assert.equal(body.duplicate, 'renamed');
+  assert.equal(inserts[0][4], 'IMG_0412-3.jpg');
+});
+test('replace mode stores the new photo, then removes the old rows and files', async () => {
+  const token = await login();
+  const { env, puts, deletes, inserts, deletedRows } = uploadEnv();
+  const result = await worker.fetch(photoUpload(token, 'session-1', 'IMG_0412.jpg', 'replace'), env, {});
+  assert.equal(result.status, 201);
+  const body = await result.json();
+  assert.equal(body.duplicate, 'replaced'); assert.equal(body.replaced, 1); assert.equal(body.filename, 'IMG_0412.jpg');
+  assert.equal(inserts.length, 1); assert.equal(puts.length, 2);
+  assert.deepEqual(deletes.sort(), ['original/old', 'preview/old']);
+  assert.equal(deletedRows.some(sql => sql.includes('DELETE FROM faces')), true);
+  assert.equal(deletedRows.some(sql => sql.includes('DELETE FROM photos')), true);
+});
+test('uploads without a duplicate mode keep the previous behaviour', async () => {
+  const token = await login();
+  const { env, inserts, deletes } = uploadEnv();
+  const result = await worker.fetch(photoUpload(token, 'session-1', 'IMG_0412.jpg'), env, {});
+  assert.equal(result.status, 201); assert.equal((await result.json()).duplicate, null);
+  assert.equal(inserts.length, 1); assert.equal(deletes.length, 0);
 });

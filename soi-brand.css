@@ -1,0 +1,29 @@
+/* Brand reference: Surfersofindia.com/site/styles.css and index.html. */
+:root{--paper:#f2ecdb;--ink:#2b2018;--marigold:#e8a23c;--clay:#b5502f;--sea:#9fc4bc;--sky:#aecbe0;--ocean:#264a6b;--coral:var(--clay);--muted:#5c6b69;--sans:'Plus Jakarta Sans',Arial,sans-serif;--mono:var(--sans)}
+body{font-family:var(--sans)}
+.brand,.topbar-brand{font-weight:800;letter-spacing:-.5px}.brand img,.topbar-brand img{border-radius:10px;flex-shrink:0}.brand small,.topbar-brand small{font-size:8px;letter-spacing:1.5px}
+.header{color:var(--ink)}.header.is-scrolled{background:#f2ecdbee}.header nav .nav-cta{background:var(--ocean)}
+.hero{background:radial-gradient(140% 100% at 20% 0%,var(--sky) 0%,var(--sea) 42%,var(--paper) 100%);color:var(--ink);min-height:850px;padding-top:155px;padding-bottom:32px}
+.hero::before{background:none}.hero-photo{background:none}.hero-photo::after{display:block;content:'';position:absolute;inset:auto 0 0;height:90px;background:var(--ocean);clip-path:polygon(0 55%,10% 30%,20% 45%,32% 80%,45% 60%,60% 25%,75% 45%,88% 80%,100% 50%,100% 100%,0 100%)}
+.hero .hero-hand{font:700 12px var(--sans);text-transform:uppercase;letter-spacing:2.5px;color:var(--clay);margin:12px 0 24px}
+.hero .soi-title{font:400 clamp(76px,11vw,150px)/.86 'Modak',Georgia,serif;letter-spacing:0;margin:0;color:var(--ink)}.soi-title span{color:var(--clay)}
+.soi-tagline{font:700 34px/1.1 'Caveat',cursive;margin:20px 0 0;color:var(--ink)}
+.hero .intro{color:var(--ink);max-width:570px;font-size:14px;line-height:1.8}.hero-note{color:#594a3c;font-size:10px}
+.hero-bottom{position:relative;color:var(--paper);border:0;font-size:8px;margin-top:50px}.hero-bottom a{color:var(--paper)}
+h2{font-family:'Modak',Georgia,serif;font-weight:400;letter-spacing:0}h2 em{font-family:'Caveat',cursive;font-weight:700;letter-spacing:0}
+.ticker{background:var(--ink);color:var(--marigold);border-color:var(--ink)}.ticker-group{font-family:'Modak',Georgia,serif;font-size:20px;letter-spacing:.7px}.ticker-group span{color:var(--marigold)}
+.finder-card{border-radius:20px;border:2px solid var(--ink);box-shadow:6px 7px 0 #2b201829}.how{background:var(--ink)}.how h2 em{color:var(--sea)}.step-number{font-family:var(--mono);font-weight:800;color:var(--marigold)}
+.button{background:var(--ocean);color:#fff;border:2px solid var(--ink);border-radius:12px;box-shadow:5px 6px 0 #2b201829}
+.button:hover{background:#1d4f76}
+.button:active{background:#1d4f76;box-shadow:2px 3px 0 #2b201829;transform:translate(3px,3px)}
+.button::before{content:none}
+dialog .button{border-color:#ffffff40;box-shadow:none}
+dialog .button:active{box-shadow:none}
+.hero .button{background:var(--ocean);color:#fff;border:2px solid var(--ink);border-radius:12px;box-shadow:5px 6px 0 #2b201829;text-transform:none;font-family:var(--sans);font-size:13px;font-weight:600;letter-spacing:0;padding:19px 24px}
+.hero .button:hover{background:#1d4f76;box-shadow:5px 6px 0 #2b201829}
+footer{background:var(--ink);color:var(--paper);flex-wrap:wrap}footer::before{background:var(--ink)}footer .brand{color:var(--paper)}footer p{font:700 27px 'Caveat',cursive}footer>div{flex-wrap:wrap;gap:18px;line-height:1.8}.motion-toggle{color:inherit}.motion-toggle span{border-color:#f2ecdb60}
+.topbar{background:#f2ecdbee}.topbar-brand{color:var(--ink)}.login-story{background:var(--sea)}.login-story::after{background:linear-gradient(transparent,#2b2018d9)}.login-story h1{font:400 64px/.95 'Modak',Georgia,serif;letter-spacing:0}.login-card h2{font-family:var(--sans);font-weight:700}.studio-heading h1{font-family:'Modak',Georgia,serif;font-size:40px;letter-spacing:0}.tabs,.drop-zone,.studio-badge{background:#ede4d0}.section-title{font-family:var(--sans)}.review-spinner{border-top-color:var(--clay)}
+.header:not(.is-scrolled) :focus-visible,.hero :focus-visible{outline-color:var(--ocean)}
+@media(max-width:650px){.hero{min-height:780px;padding-top:120px}.hero .hero-hand{font-size:9px;letter-spacing:1.4px}.hero .soi-title{font-size:clamp(68px,15.7vw,100px)}.soi-tagline{font-size:29px}.hero .intro{font-size:12px;max-width:340px}.hero-bottom{font-size:7px}.brand{font-size:12px;gap:7px}.brand small{font-size:6px;letter-spacing:1px}.header nav .nav-cta{font-size:8px;letter-spacing:0;padding:12px 10px}.header nav .nav-cta span{margin-left:5px}.topbar-brand{font-size:14px}.studio-heading h1{font-size:32px}footer>div{border-color:#f2ecdb30}.login-story h1{font-size:52px}}
+
+.password-field{position:relative}.login-card .password-field input{width:100%;padding-right:68px}.password-toggle{position:absolute;right:10px;top:50%;transform:translateY(-50%);border:0;background:transparent;color:var(--ocean);padding:8px;font-size:11px;font-weight:700}.login-card .publish-btn{margin-top:16px;background:var(--clay);border-radius:12px}.login-card{background:#fffaf0;border:1px solid #e7dcc2}.login-story{border:2px solid var(--ink);border-right:0}.login-card h2{font-size:29px;line-height:1.2}.login-card .eyebrow{color:var(--clay);margin-bottom:16px}

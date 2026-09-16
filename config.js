@@ -1,10 +1,4 @@
-/*
- * Live deployment configuration. This file is public: never put a secret in it.
- *
- * For local Worker development use: http://127.0.0.1:8787
- * For production use your deployed Worker URL, for example:
- * https://mambo-jambo-photo-api.your-account.workers.dev
- */
-window.MJ_CONFIG = {
-  apiUrl: 'https://mambo-jambo-photo-api.surfersofindia.workers.dev',
-};
+/* Requests use the site origin; Vercel and the local server proxy /api to the Worker.
+ * The Hostinger subdomain has no such proxy, so it calls the Worker directly (CORS-enabled). */
+const WORKER_URL = 'https://mambo-jambo-photo-api.surfersofindia.workers.dev';
+window.MJ_CONFIG = { apiUrl: window.location.hostname === 'photos.surfersofindia.com' ? WORKER_URL : window.location.origin };
