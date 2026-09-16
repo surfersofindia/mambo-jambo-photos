@@ -886,7 +886,7 @@
         <!-- Verification Stats Bar -->
         <div class="metrics-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 24px;">
           <div class="metric-card">
-            <label>Pending Reviews</label>
+            <label>Ready to review</label>
             <div class="value" id="verifyPending">0</div>
           </div>
           <div class="metric-card">
@@ -899,7 +899,7 @@
           </div>
         </div>
 
-        <div class="verify-grid" id="verifyGrid">
+        <p class="admin-notice" id="reviewUnavailable" role="status" hidden></p><div class="verify-grid" id="verifyGrid">
           <p class="loading-msg">Loading match verification queue...</p>
         </div>
       </div>

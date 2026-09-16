@@ -538,12 +538,6 @@ export default {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
         const base = url.origin;
 
-        // Auto-scan borderline matches if queue is empty
-        const countCheck = await env.DB.prepare("SELECT COUNT(*) as cnt FROM face_verifications WHERE status = 'pending'").first();
-        if (!countCheck || countCheck.cnt === 0) {
-          await generateBorderlineMatches(env);
-        }
-
         const query = `
           SELECT
             fv.id, fv.similarity, fv.status, s.title as session_title,
@@ -560,11 +554,16 @@ export default {
           WHERE fv.status = 'pending' AND f1.bbox_json IS NOT NULL AND f2.bbox_json IS NOT NULL
             AND p1.indexing_status = 'completed' AND p2.indexing_status = 'completed'
           ORDER BY fv.similarity DESC
-          LIMIT 20
         `;
-        const res = await env.DB.prepare(query).all();
+        let res = await env.DB.prepare(query).all();
+        let reviewable = res.results.filter(item => faceBounds(item.face1_bbox) && faceBounds(item.face2_bbox));
+        if (!reviewable.length) {
+          await generateBorderlineMatches(env);
+          res = await env.DB.prepare(query).all();
+          reviewable = res.results.filter(item => faceBounds(item.face1_bbox) && faceBounds(item.face2_bbox));
+        }
 
-        const queue = await Promise.all(res.results.filter(item => faceBounds(item.face1_bbox) && faceBounds(item.face2_bbox)).map(async (item) => ({
+        const queue = await Promise.all(reviewable.slice(0, 20).map(async (item) => ({
           id: item.id,
           sessionTitle: item.session_title,
           similarityPct: Math.round(item.similarity * 100),
@@ -590,7 +589,7 @@ export default {
           FROM face_verifications
         `).first();
 
-        return response({ queue, stats: { pending: stats?.pending || 0, confirmed: stats?.confirmed || 0, rejected: stats?.rejected || 0 } }, request, env);
+        return response({ queue, stats: { pending: reviewable.length, unavailable: Math.max(0, Number(stats?.pending || 0) - reviewable.length), confirmed: stats?.confirmed || 0, rejected: stats?.rejected || 0 } }, request, env);
       }
 
       // POST /api/admin/confirm-match - Confirm or reject borderline face match

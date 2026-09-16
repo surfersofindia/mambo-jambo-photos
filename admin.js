@@ -626,6 +626,9 @@ async function loadVerifyQueue() {
   try {
     const { queue, stats } = await apiRequest('/api/admin/verify-queue');
     document.getElementById('verifyPending').textContent = stats.pending || 0;
+    const unavailable = document.getElementById('reviewUnavailable');
+    unavailable.hidden = !stats.unavailable;
+    unavailable.textContent = `${stats.unavailable} saved pair(s) cannot be shown yet because face crops are missing or their photos are still processing. Re-index the affected sessions, wait for processing to finish, then scan again.`;
     document.getElementById('verifyConfirmed').textContent = stats.confirmed || 0;
     document.getElementById('verifyRejected').textContent = stats.rejected || 0;
     if (!queue?.length) { grid.innerHTML = '<p class="empty-msg">No uncertain face pairs available. Once photos finish processing, scan again to find pairs for review.</p>'; return; }

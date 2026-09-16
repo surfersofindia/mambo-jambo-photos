@@ -95,3 +95,10 @@ test('review finds fresh uncertain pairs, returns precise crops, and records one
   assert.equal((await send('/api/admin/confirm-match', { pairId, confirmed: true })).status, 409);
   assert.equal((await (await send('/api/admin/verify-queue/scan', {})).json()).generated, 0);
 });
+test('pending pairs without face coordinates do not inflate the ready count or block new pairs', async context => {
+  const { env, sql, token } = await setup(context);
+  sql.exec("UPDATE photos SET indexing_status='completed'; INSERT INTO photos(id,session_id,object_key,preview_key,filename,content_type,indexing_status) VALUES('other','session','o2','v2','other.jpg','image/jpeg','completed'); INSERT INTO faces(id,photo_id,embedding_json,bbox_json) VALUES('a','photo','[1,0]',NULL),('b','other','[0.62,0.7846]',NULL),('c','photo','[1,0]','[10,10,20,20]'),('d','other','[0.62,0.7846]','[20,20,20,20]'); INSERT INTO face_verifications(id,session_id,face1_id,face2_id,similarity,status) VALUES('hidden','session','a','b',.62,'pending');");
+  const response = await worker.fetch(new Request('https://api.test/api/admin/verify-queue', { headers: { Authorization: `Bearer ${token}` } }), env, {});
+  assert.equal(response.status, 200);
+  const body = await response.json(); assert.equal(body.stats.unavailable, 1); assert.equal(body.stats.pending, 1); assert.equal(body.queue.length, 1);
+});
