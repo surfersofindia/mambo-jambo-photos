@@ -19,6 +19,8 @@
   "vars": {
     "ALLOWED_ORIGIN": "https://mambo-jambo-photos.vercel.app,https://photos.surfersofindia.com",
     "MATCH_THRESHOLD": "0.62",
+    "BURST_GAP_SECONDS": "2",
+    "APPEARANCE_THRESHOLD": "0.85",
     "FACE_API_URL": "https://ankitkotian-mambo-jambo-face-api.hf.space/extract",
     "CASHFREE_ENV": "sandbox"
   },

@@ -180,6 +180,12 @@ async function confirmPayment(orderId) {
   applyUnlockedPhotos(result.photos);
   sessionStorage.removeItem('mjCheckout');
 }
+const cashfreeInstances = {};
+function getCashfree(mode) {
+  const key = mode === 'production' ? 'production' : 'sandbox';
+  if (!cashfreeInstances[key]) cashfreeInstances[key] = window.Cashfree({ mode: key });
+  return cashfreeInstances[key];
+}
 $('#unlockButton').addEventListener('click', () => { checkoutStatusMsg(); $('#checkoutDialog').showModal(); });
 $('#cancelCheckout').addEventListener('click', () => $('#checkoutDialog').close());
 $('#checkoutForm').addEventListener('submit', async (event) => {
@@ -193,9 +199,11 @@ $('#checkoutForm').addEventListener('submit', async (event) => {
     const order = await requestApi('/api/checkout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ searchId: currentSearch.searchId, token: currentSearch.token, phone, email: email || undefined }) });
     if (!order.paymentSessionId || !window.Cashfree) throw new Error('Payment could not start. Please refresh and try again.');
     sessionStorage.setItem('mjCheckout', JSON.stringify({ searchId: currentSearch.searchId, token: currentSearch.token }));
-    const cashfree = window.Cashfree({ mode: order.mode === 'production' ? 'production' : 'sandbox' });
+    const cashfree = getCashfree(order.mode);
     const result = await cashfree.checkout({ paymentSessionId: order.paymentSessionId, redirectTarget: '_modal' });
+    // Three terminal states: error (failed/cancelled), redirect (navigating away — return_url picks it up), paymentDetails (attempt made, must verify).
     if (result?.error) { checkoutStatusMsg('Payment was not completed. You can try again.', true); return; }
+    if (result?.redirect) { checkoutStatusMsg('Redirecting to complete your payment…'); return; }
     checkoutStatusMsg('Confirming your payment…');
     await confirmPayment(order.orderId);
     $('#checkoutDialog').close();
@@ -228,7 +236,7 @@ $('#backHome').addEventListener('click', returnToSearch);
 document.querySelectorAll('a[href^="#"]').forEach(link => link.addEventListener('click', () => { searchController?.abort(); $('#main').hidden = false; $('#results').hidden = true; }));
 window.addEventListener('pagehide', event => { if (!event.persisted && previewUrl) URL.revokeObjectURL(previewUrl); searchController?.abort(); });
 async function resumeCheckoutFromRedirect() {
-  const orderId = new URLSearchParams(location.search).get('cfOrder');
+  const orderId = new URLSearchParams(location.search).get('order_id');
   if (!orderId) return;
   history.replaceState(null, '', location.pathname + location.hash);
   const stored = sessionStorage.getItem('mjCheckout');

@@ -22,17 +22,18 @@
   function applyPreference() {
     document.body.classList.toggle('motion-enabled', enabled());
     document.body.classList.toggle('motion-paused', !enabled());
-    toggle.hidden = reduced.matches;
-    toggle.setAttribute('aria-pressed', String(paused));
-    toggle.replaceChildren(document.createTextNode(paused ? 'Resume motion ' : 'Pause motion '));
-    const icon = document.createElement('span'); icon.setAttribute('aria-hidden', 'true'); icon.textContent = paused ? '▷' : 'Ⅱ'; toggle.append(icon);
+    if (toggle) {
+      toggle.hidden = reduced.matches;
+      toggle.setAttribute('aria-pressed', String(paused));
+      toggle.replaceChildren(document.createTextNode(paused ? 'Resume motion ' : 'Pause motion '));
+      const icon = document.createElement('span'); icon.setAttribute('aria-hidden', 'true'); icon.textContent = paused ? '▷' : 'Ⅱ'; toggle.append(icon);
+    }
     if (!enabled()) {
       running.forEach(animation => animation.cancel());
-      hero.style.removeProperty('--tilt-x'); hero.style.removeProperty('--tilt-y'); hero.style.removeProperty('--photo-drift');
-      document.querySelectorAll('.button,.nav-cta').forEach(resetMagnet);
+      hero?.style.removeProperty('--photo-drift');
     }
   }
-  toggle.addEventListener('click', () => {
+  toggle?.addEventListener('click', () => {
     paused = !paused;
     try { localStorage.setItem('mj-motion-paused', String(paused)); } catch { /* Optional preference. */ }
     applyPreference();
@@ -64,30 +65,20 @@
   document.addEventListener('mj:stage', event => animate(document.getElementById(`${event.detail}Stage`), [{ opacity: .35, transform: 'translateY(9px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 400 }));
   const lightboxImage = document.getElementById('lightboxImage');
   document.addEventListener('mj:photo', () => {
+    if (!lightboxImage) return;
     lightboxImage.getAnimations().forEach(animation => animation.cancel());
     animate(lightboxImage, [{ opacity: .2, transform: 'scale(.985)' }, { opacity: 1, transform: 'scale(1)' }], { duration: 420 });
   });
   const lightbox = document.getElementById('lightbox');
-  lightbox.addEventListener('click', event => { if (event.target === lightbox) lightbox.close(); });
-  function resetMagnet(element) { element.style.removeProperty('--magnet-x'); element.style.removeProperty('--magnet-y'); }
-  document.querySelectorAll('.button,.nav-cta').forEach(button => {
-    button.addEventListener('pointermove', event => {
-      if (!enabled() || !finePointer.matches || button.disabled) return;
-      const box = button.getBoundingClientRect();
-      button.style.setProperty('--magnet-x', `${(event.clientX - box.left - box.width / 2) * .045}px`);
-      button.style.setProperty('--magnet-y', `${(event.clientY - box.top - box.height / 2) * .08}px`);
-    });
-    button.addEventListener('pointerleave', () => resetMagnet(button));
-    button.addEventListener('blur', () => resetMagnet(button));
-  });
+  lightbox?.addEventListener('click', event => { if (event.target === lightbox) lightbox.close(); });
   let scheduled = false;
   function updateScroll() {
     scheduled = false;
-    header.classList.toggle('is-scrolled', window.scrollY > 20);
+    header?.classList.toggle('is-scrolled', window.scrollY > 20);
     if (!enabled()) return;
     const distance = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
-    progress.style.setProperty('--read', Math.min(1, Math.max(0, window.scrollY / distance)));
-    if (finePointer.matches && window.scrollY < 900) hero.style.setProperty('--photo-drift', `${Math.min(30, window.scrollY * .045)}px`);
+    progress?.style.setProperty('--read', Math.min(1, Math.max(0, window.scrollY / distance)));
+    if (finePointer.matches && window.scrollY < 900) hero?.style.setProperty('--photo-drift', `${Math.min(30, window.scrollY * .045)}px`);
   }
   window.addEventListener('scroll', () => { if (!scheduled) { scheduled = true; requestAnimationFrame(updateScroll); } }, { passive: true });
   window.addEventListener('resize', updateScroll, { passive: true });

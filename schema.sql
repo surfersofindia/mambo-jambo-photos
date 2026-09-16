@@ -22,9 +22,11 @@ CREATE TABLE IF NOT EXISTS photos (
   filename TEXT NOT NULL,
   content_type TEXT NOT NULL,
   indexing_status TEXT NOT NULL DEFAULT 'pending' CHECK (indexing_status IN ('pending', 'completed', 'failed')),
+  captured_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS photos_by_session ON photos(session_id);
+CREATE INDEX IF NOT EXISTS photos_by_session_captured_at ON photos(session_id, captured_at);
 
 CREATE TABLE IF NOT EXISTS faces (
   id TEXT PRIMARY KEY,
@@ -74,6 +76,62 @@ CREATE TABLE IF NOT EXISTS face_verifications (
   UNIQUE(face1_id, face2_id)
 );
 CREATE INDEX IF NOT EXISTS verifications_by_status ON face_verifications(status);
+
+-- Photo-level fallback match candidates (burst-timing, later also appearance) for photos where
+-- direct face matching isn't confident enough — reviewed by the crew before guests ever see them.
+CREATE TABLE IF NOT EXISTS photo_links (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  photo1_id TEXT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+  photo2_id TEXT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+  link_type TEXT NOT NULL CHECK (link_type IN ('burst', 'appearance')),
+  score REAL NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'rejected')),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(photo1_id, photo2_id, link_type)
+);
+CREATE INDEX IF NOT EXISTS photo_links_by_status ON photo_links(status);
+CREATE INDEX IF NOT EXISTS photo_links_by_photo1 ON photo_links(photo1_id);
+CREATE INDEX IF NOT EXISTS photo_links_by_photo2 ON photo_links(photo2_id);
+
+-- Per-photo clothing/body appearance descriptor (HSV color histogram of the dominant detected
+-- person), used as a fallback matching signal when a photo has no usable face. One row per photo;
+-- re-indexing replaces it.
+CREATE TABLE IF NOT EXISTS photo_appearances (
+  photo_id TEXT PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
+  bbox_json TEXT,
+  histogram_json TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Logs every crew confirm/reject decision (face pairs and burst/appearance links) with its
+-- feature value, so match_weights can be periodically refit from accumulated review outcomes.
+-- A row only ever has one of the three feature columns set — the signal types never co-occur on
+-- a single review — so one combined logistic regression naturally learns independent weights
+-- per signal without needing separate models.
+CREATE TABLE IF NOT EXISTS match_feedback (
+  id TEXT PRIMARY KEY,
+  source TEXT NOT NULL CHECK (source IN ('face_pair', 'burst_link', 'appearance_link')),
+  face_similarity REAL,
+  burst_score REAL,
+  appearance_similarity REAL,
+  label INTEGER NOT NULL CHECK (label IN (0, 1)),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Singleton row of fitted scoring weights. Defaults mean "act exactly as before" until there is
+-- enough review data to retrain (see MIN_FEEDBACK_FOR_TRAINING in worker.js).
+CREATE TABLE IF NOT EXISTS match_weights (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  face_weight REAL NOT NULL DEFAULT 1,
+  burst_weight REAL NOT NULL DEFAULT 0,
+  appearance_weight REAL NOT NULL DEFAULT 0,
+  bias REAL NOT NULL DEFAULT 0,
+  trained_on INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+INSERT OR IGNORE INTO match_weights (id) VALUES (1);
 
 CREATE TABLE IF NOT EXISTS indexing_jobs (
   photo_id TEXT PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,

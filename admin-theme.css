@@ -16,3 +16,8 @@ body{background:var(--bg)}a:focus-visible,button:focus-visible,input:focus-visib
 .review-queue-loading{display:flex;align-items:center;justify-content:center;gap:12px}
 @keyframes review-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.review-spinner{animation:none}}
+
+/* Burst & appearance fallback links compare whole photos, not isolated face crops. */
+.link-photo-img{display:block;width:100%;aspect-ratio:4/3;object-fit:cover;background:#e7dcc2;border:1px solid var(--border);border-radius:9px}
+.link-photo-error .link-photo-img{opacity:.35}
+.link-photo-error::after{content:'Photo could not load';display:block;font:10px var(--sans);color:var(--coral);margin-top:6px}

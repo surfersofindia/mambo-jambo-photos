@@ -24,7 +24,7 @@ Open http://127.0.0.1:4173. `config.js` currently points at the deployed API. It
 npx wrangler dev --var ALLOWED_ORIGIN:http://127.0.0.1:4173
 ```
 
-Set `apiUrl` in `config.js` to `http://127.0.0.1:8787` for this setup. Supply `ADMIN_PASSWORD`, `SESSION_SECRET`, `CASHFREE_APP_ID`, `CASHFREE_SECRET_KEY` and `CASHFREE_WEBHOOK_SECRET` in an uncommitted `.dev.vars` file. Set `FACE_API_URL` to your face service's `/extract` endpoint. Do not use production passwords for local development. Cashfree webhooks cannot reach localhost, so test the full paid flow against a deployed Worker (`CASHFREE_ENV=sandbox`) or a tunnel.
+Set `apiUrl` in `config.js` to `http://127.0.0.1:8787` for this setup. Supply `ADMIN_PASSWORD`, `SESSION_SECRET`, `CASHFREE_APP_ID` and `CASHFREE_SECRET_KEY` in an uncommitted `.dev.vars` file. Set `FACE_API_URL` to your face service's `/extract` endpoint. Do not use production passwords for local development. Cashfree webhooks cannot reach localhost, so test the full paid flow against a deployed Worker (`CASHFREE_ENV=sandbox`) or a tunnel.
 
 Initialize a fresh local database:
 
@@ -43,19 +43,26 @@ There are no fabricated session or match results. Empty sessions and API failure
 
 The selfie is sent to the Worker and forwarded to the face service. The provided code does not persist guest selfies or their embeddings. D1 does store a search record with matched photo IDs; signed access expires, but records are not automatically deleted. Hosting-provider logging and retention must be reviewed separately. Session photos and indexed face embeddings remain stored until removed by the crew.
 
+A guest's results are not only direct face matches: if a matched photo has a crew-**confirmed** burst or appearance link (see Crew flow below) to another photo with no usable face of its own, that linked photo is included too, at a slightly discounted score. Pending and rejected links are never surfaced to guests.
+
 ## Crew flow
 
 Open `/admin.html` (or `/admin` on Vercel), sign in, create a session, upload images, and publish. The crew can manage sessions, inspect photos, reindex and review borderline face pairs, and set the photo-pack price guests pay to unlock originals. **Upload more** on a session card adds photos to a draft or published session; files whose names already exist in that session are listed first, and the crew chooses whether to replace the existing photos, upload only the new files, or keep both as numbered copies (`IMG_0412-2.jpg`). Reviewing face pairs records a crew decision; those decisions are not currently applied to guest match scoring.
 
+The **Review matches** tab also surfaces two kinds of fallback links for photos with no usable face (the surfer facing away, for example): burst-sequence links to a photo shot within a couple of seconds of one that does have a face (`BURST_GAP_SECONDS`, default 2s), and clothing-appearance links to a photo with a detected face whose clothing color histogram closely matches (`APPEARANCE_THRESHOLD`, default 0.85 — see "Body/clothing appearance matching" below for how that signal is produced). "Scan Burst & Appearance Links" proposes candidates for the crew to confirm or reject. Unlike face-pair reviews, **confirming a link here does reach guests** — see "Guest flow" above and `/api/match` in `worker.js`.
+
 ## Database compatibility
 
-`schema.sql` now includes `faces.bbox_json` and `face_verifications`, both used by existing admin indexing and verification features. For an existing database, inspect `PRAGMA table_info(faces)` before upgrading. If `bbox_json` is absent, add it once:
+`schema.sql` now includes `faces.bbox_json`, `face_verifications`, and `photos.captured_at`, used by existing admin indexing, verification, and burst-grouping features. For an existing database, inspect `PRAGMA table_info(faces)` and `PRAGMA table_info(photos)` before upgrading. If `bbox_json` or `captured_at` are absent, add them once:
 
 ```sql
 ALTER TABLE faces ADD COLUMN bbox_json TEXT;
+ALTER TABLE photos ADD COLUMN captured_at TEXT;
 ```
 
 Then apply `schema.sql` to create any missing tables/indexes. `CREATE TABLE IF NOT EXISTS` does not add columns to an existing table. Back up remote data and inspect the existing schema before migration; no remote migration has been performed by this rebuild.
+
+`photos.captured_at` is populated from EXIF by the face service and only backfills when a photo is (re)indexed — apply `migrations/0004_capture_metadata.sql` then re-index existing sessions (`/api/admin/reindex` or per-session reindex) to populate it for already-uploaded photos. Photos with stripped or missing EXIF (screenshots, some compression tools) simply keep `captured_at = NULL`.
 
 ## Checks
 
@@ -66,13 +73,13 @@ npm test
 npx wrangler deploy --dry-run
 ```
 
-Tests cover matching with a mocked face service, deduplicated signed previews, original-photo isolation, authentication, session validation, streaming upload limits, CORS, Cashfree checkout/verification/webhook handling (mocked), and public build asset completeness. Browser and real-service end-to-end testing are still required before launch.
+Tests cover matching with a mocked face service, deduplicated signed previews, original-photo isolation, authentication, session validation, streaming upload limits, CORS, Cashfree checkout/verification/webhook handling (mocked), public build asset completeness, burst-sequence grouping, burst/appearance fallback-link generation and review, the confirm/reject feedback log and weight-retraining logistic regression, and confirmed links extending a guest's matched photos. Browser and real-service end-to-end testing (including the actual HOG detector and EXIF parsing against real camera JPEGs, not just mocked face-service responses) are still required before launch.
 
 ## Deployment
 
-1. Verify D1 schema compatibility and private R2 storage. Apply `migrations/0002_cashfree_payments.sql` if upgrading an existing database.
-2. Configure Worker secrets `ADMIN_PASSWORD`, `SESSION_SECRET`, `CASHFREE_APP_ID`, `CASHFREE_SECRET_KEY`, `CASHFREE_WEBHOOK_SECRET`, and variables `ALLOWED_ORIGIN`, `FACE_API_URL`, `MATCH_THRESHOLD`, `CASHFREE_ENV` (`sandbox` or `production`).
-3. In the Cashfree dashboard, point the webhook URL at `<worker-url>/api/payment/webhook` and copy its signing secret into `CASHFREE_WEBHOOK_SECRET`.
+1. Verify D1 schema compatibility and private R2 storage. Apply `migrations/0002_cashfree_payments.sql`, `migrations/0004_capture_metadata.sql`, `migrations/0005_photo_links.sql`, `migrations/0006_photo_appearances.sql`, and `migrations/0007_match_learning.sql` if upgrading an existing database.
+2. Configure Worker secrets `ADMIN_PASSWORD`, `SESSION_SECRET`, `CASHFREE_APP_ID`, `CASHFREE_SECRET_KEY`, and variables `ALLOWED_ORIGIN`, `FACE_API_URL`, `MATCH_THRESHOLD`, `CASHFREE_ENV` (`sandbox` or `production`). `BURST_GAP_SECONDS` (default 2) and `APPEARANCE_THRESHOLD` (default 0.85) are optional and only affect fallback-link candidate generation.
+3. In the Cashfree dashboard, point the webhook URL at `<worker-url>/api/payment/webhook` (version `2023-08-01` or later). Cashfree signs webhooks with the same `CASHFREE_SECRET_KEY` used for API calls — there is no separate webhook secret to configure.
 4. Deploy the Worker with `npm run deploy:api`.
 5. Set the public `config.js` API URL, then deploy to Vercel, which runs the build and serves `dist/`. Deploy API and frontend together because matching now requires the consent field.
 6. Test upload → indexing → publication → consent → matching → previews → checkout → payment verification → unlocked originals on desktop and mobile, using consented test photos and Cashfree sandbox test cards/UPI.
@@ -81,11 +88,22 @@ Tests cover matching with a mocked face service, deduplicated signed previews, o
 
 - Visual and keyboard QA in real browsers, including mobile Safari.
 - Real matching accuracy and threshold validation on consented session photos.
+- Real-world accuracy of the HOG person detector and burst/appearance fallback links against actual session photos — since confirming a link now reaches guest results (see "Guest flow"), a crew mis-confirmation shows a guest someone else's photo, not just a false entry in an internal review queue.
 - Infrastructure rate limits for public matching and admin login; authentication/private access for the face service.
 - Provider retention review, a working data-request contact, and a defined data cleanup schedule.
 - Backups, service monitoring, inference capacity and dependency/security review.
 
 Production website: https://photos.surfersofindia.com (also mirrored at https://mambo-jambo-photos.vercel.app).
+
+## Body/clothing appearance matching
+
+For every indexed photo, the face service also runs OpenCV's built-in HOG person detector (`face-api/main.py`) — no extra model download or dependency beyond `opencv-python-headless`, already required for face detection — and, if a person is found, computes a normalized HSV color histogram of their lower ~65% (clothing, not head/hair) as a coarse "same outfit" descriptor. This runs for every photo regardless of whether a face was also detected, since a surfer keeps the same wetsuit/boardshorts for a whole session. Stored in `photo_appearances` (one row per photo, replaced on re-index).
+
+This is a deliberately lightweight choice over a YOLO/torch-based person detector: HOG ships inside the dependency the face service already has, so this added zero new packages and no extra cold-start cost on the Hugging Face Spaces container it runs on. It is also weaker than YOLO on crouched, mid-air, or heavily cropped action shots — if real-world recall proves too low, swap `detect_person_bbox()` in `face-api/main.py` for an ONNX-based detector; `clothing_histogram()` and the worker-side matching in `generateFallbackLinks()` don't care which detector produced the box. Only the single largest (dominant) detected person per photo is used — photos with multiple surfers close together in frame will have lower appearance-match recall for anyone but the largest subject in shot; this is a known v1 limitation, not a bug.
+
+## Learning from crew reviews
+
+Every confirm/reject decision on a face pair or a burst/appearance link is logged to `match_feedback` with the feature value that produced the candidate (face similarity, burst timing closeness, or appearance similarity). "🧠 Retrain from Reviews" in the Review matches tab (`POST /api/admin/retrain`) refits a small logistic regression — hand-rolled in `worker.js` (`fitLogisticRegression`), since there's no ML library available inside a Cloudflare Worker — over all accumulated feedback, and stores the fitted weights in the `match_weights` singleton row. This is genuinely "the more the crew reviews, the more accurate it gets," but concretely: it recalibrates how confidently `generateFallbackLinks()` scores and gates future burst/appearance candidates (`sigmoid(bias + weight · signal) ≥ 0.5`) from crew-labeled examples — it does **not** retrain or fine-tune the InsightFace face-recognition network itself, which is out of scope for this stack. Retraining is a no-op (`trained: false`) below `MIN_FEEDBACK_FOR_TRAINING` (20) labeled reviews, or until both confirmed and rejected examples exist — until then, scoring keeps using the original fixed thresholds (`APPEARANCE_THRESHOLD` etc.) so behavior never regresses for lack of data. Retraining is a deliberate crew action (a button), not automatic on every decision, so a review click never risks the extra latency of a fit.
 
 ## Durable photo indexing
 

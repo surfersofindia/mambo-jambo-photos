@@ -1,0 +1,7 @@
+# This app ships frequent updates; force revalidation on every load so a
+# fix or content change is never masked by a stale client-side cache.
+<IfModule mod_headers.c>
+  <FilesMatch "\.(html|js|css)$">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+</IfModule>
