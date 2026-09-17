@@ -21,17 +21,24 @@ async function setup(context) {
   const consume = async (body = messages[0], attempts = 1) => { const result = { ack: false, retry: false }; await worker.queue({ messages: [{ body, attempts, ack() { result.ack = true; }, retry() { result.retry = true; } }] }, env); return result; };
   return { sql, env, messages, enqueue, consume, token };
 }
-test('reindex queues immediately, deduplicates clicks, and commits detected faces', async context => {
+test('reindex queues immediately, force-reindex overrides an in-flight click, and commits detected faces', async context => {
   const { sql, messages, enqueue, consume } = await setup(context);
   let requests = 0; context.mock.method(globalThis, 'fetch', async () => { requests++; return Response.json({ faces: [{ embedding: [1, 0], confidence: .99 }], captured_at: '2026-09-15T08:30:00' }); });
   const response = await enqueue(); assert.equal(response.status, 202); assert.deepEqual(await response.json(), { queued: 1, alreadyQueued: 0, failed: 0 });
   assert.equal(requests, 0); assert.equal(messages.length, 1);
-  assert.deepEqual(await (await enqueue()).json(), { queued: 0, alreadyQueued: 1, failed: 0 });
-  assert.deepEqual(await consume(), { ack: true, retry: false });
+  // A second click before the first job is even consumed force-overrides it: a fresh job replaces
+  // the queued one instead of deduping, so the crew can always override a stuck run.
+  assert.deepEqual(await (await enqueue()).json(), { queued: 1, alreadyQueued: 0, failed: 0 });
+  assert.equal(messages.length, 2);
+  // The superseded first message's job_id no longer matches the row, so its stale consumer just acks.
+  assert.deepEqual(await consume(messages[0]), { ack: true, retry: false });
+  assert.equal(requests, 0);
+  // The second (current) job still processes and commits normally.
+  assert.deepEqual(await consume(messages[1]), { ack: true, retry: false });
   assert.equal(sql.prepare('SELECT indexing_status FROM photos').get().indexing_status, 'completed');
   assert.equal(sql.prepare('SELECT captured_at FROM photos').get().captured_at, '2026-09-15T08:30:00');
   assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM faces').get().n, 1);
-  await consume(); assert.equal(requests, 1);
+  assert.equal(requests, 1);
 });
 test('face service failure retries and reports terminal failure without deleting old faces', async context => {
   const { sql, enqueue, consume } = await setup(context);

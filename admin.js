@@ -326,6 +326,11 @@ let adminFiles = [];
 let uploadBusy = false;
 const dropZone = document.getElementById('adminDropZone');
 const photoInput = document.getElementById('adminPhotoInput');
+const retryUploadBtn = document.getElementById('retryUploadBtn');
+// What's left to retry after a publish leaves some photos failed: { sessionId, items, rows }
+// (`rows` are the same <li> elements from the original pick, kept in sync by index).
+let lastUpload = null;
+function clearLastUpload() { lastUpload = null; retryUploadBtn.hidden = true; }
 
 // `kind` ('warning') colours a heads-up that isn't a failure — "1 file left out" must not read as red.
 function setStatus(text, isError = false, kind = '') {
@@ -361,6 +366,7 @@ function isSupportedPhoto(file) { return (['image/jpeg', 'image/png', 'image/web
 
 function selectFiles(files) {
   if (uploadBusy) return;
+  clearLastUpload();
   const selected = [...files];
   adminFiles = selected.filter(isSupportedPhoto);
   const rejected = selected.filter(file => !isSupportedPhoto(file));
@@ -427,7 +433,7 @@ function renderFileList() {
   const header = document.createElement('div'); header.className = 'file-queue-head';
   const summary = document.createElement('strong'); summary.textContent = `${adminFiles.length} photos · ${(adminFiles.reduce((sum, file) => sum + file.size, 0) / 1048576).toFixed(1)} MB`;
   const clear = document.createElement('button'); clear.type = 'button'; clear.textContent = 'Clear'; clear.disabled = uploadBusy;
-  clear.addEventListener('click', () => { adminFiles = []; photoInput.value = ''; renderFileList(); clearStatus(); });
+  clear.addEventListener('click', () => { adminFiles = []; photoInput.value = ''; renderFileList(); clearStatus(); clearLastUpload(); });
   header.append(summary, clear); const list = document.createElement('ul'); list.className = 'photo-list';
   adminFiles.forEach((file, index) => {
     const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Remove'; remove.disabled = uploadBusy; remove.setAttribute('aria-label', `Remove ${file.name}`);
@@ -462,7 +468,11 @@ dropZone.addEventListener('drop', (e) => selectFiles(e.dataTransfer.files));
 // so several large files at once can exceed its limit and drop connections.
 const UPLOAD_MAX_WORKERS = 3;
 const UPLOAD_BYTE_BUDGET = 20 * 1024 * 1024; // ~20 MB of originals in flight at once (buffering server)
-const UPLOAD_MAX_ATTEMPTS = 3;
+// A phone switching Wi-Fi/cellular mid-upload kills every in-flight socket at once — that's a
+// network drop, not a dead link, and it can take several seconds for the OS to reconnect. Retry
+// generously enough to ride that out instead of failing the whole batch over one handover.
+const UPLOAD_MAX_ATTEMPTS = 6;
+const UPLOAD_RETRY_BACKOFF_MS = attempt => Math.min(1500 * attempt, 6000);
 // When the Worker streams uploads straight to storage it no longer holds whole files in
 // memory, so many can run at once. Turn this on ONLY once that Worker path is deployed —
 // against an old (buffering) Worker the streaming request format fails.
@@ -569,7 +579,7 @@ async function uploadPhotoBatch(sessionId, items, onProgress, onItem = () => {})
       try { return await uploadOne(item, preview, index); }
       catch (error) {
         if (!error.retryable || attempt >= UPLOAD_MAX_ATTEMPTS) throw error;
-        await new Promise(resolve => setTimeout(resolve, 700 * attempt));
+        await new Promise(resolve => setTimeout(resolve, UPLOAD_RETRY_BACKOFF_MS(attempt)));
       }
     }
   };
@@ -661,8 +671,9 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
     });
 
     const sessionId = create.session.id;
-    setStatus(`Uploading ${adminFiles.length} photo${adminFiles.length === 1 ? '' : 's'}…`);
-    const { results, failures, stopped } = await uploadPhotoBatch(sessionId, adminFiles.map(file => ({ file })), setProgress, (index, state, detail) => markRowFromResult(rows[index], state, detail));
+    const items = adminFiles.map(file => ({ file }));
+    setStatus(`Uploading ${items.length} photo${items.length === 1 ? '' : 's'}…`);
+    const { results, failures, stopped } = await uploadPhotoBatch(sessionId, items, setProgress, (index, state, detail) => markRowFromResult(rows[index], state, detail));
     if (stopped) {
       // The draft stays private: what landed can be published from Sessions, the rest added via "Upload more".
       leaveTickedList(results.length, 'in the draft');
@@ -677,8 +688,12 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
     leaveTickedList(results.length, 'published');
     window.SOI?.haptic?.([15]);
     if (failures.length) {
-      setStatus(`Live with ${results.length} of ${results.length + failures.length}. ${failures.length} failed — Sessions → Add photos to retry. ${failures[0].message}`, true);
+      lastUpload = { sessionId, items: failures.map(f => f.item), rows: failures.map(f => rows[items.indexOf(f.item)]) };
+      retryUploadBtn.hidden = false; retryUploadBtn.disabled = false;
+      retryUploadBtn.textContent = `Retry ${failures.length} failed`;
+      setStatus(`Live with ${results.length} of ${results.length + failures.length}. ${failures.length} failed — retry below. ${failures[0].message}`, true);
     } else {
+      clearLastUpload();
       setStatus('Live. Faces are indexing — watch it in Sessions.');
       window.SOI?.splash?.({ at: publishBtn, symbol: 'stamp-sunburst', count: 12 });
     }
@@ -698,6 +713,41 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
     publishBtn.disabled = !adminFiles.length;
     delete queueEl.dataset.uploading;
     queueEl.querySelectorAll('button').forEach(control => { control.disabled = false; });
+  }
+});
+
+// One tap resends exactly the photos that failed, straight into the now-published session.
+retryUploadBtn.addEventListener('click', async () => {
+  if (!lastUpload || uploadBusy) return;
+  const { sessionId, items, rows } = lastUpload;
+  uploadBusy = true;
+  document.querySelectorAll('#uploadForm input, #uploadForm button:not(#cancelUploadBtn)').forEach(control => { control.disabled = true; });
+  signOutBtn.disabled = true;
+  retryUploadBtn.textContent = 'Retrying…';
+  rows.forEach(row => setRowState(row, 'waiting', { tag: '' }));
+  hideProgress();
+  setStatus(`Retrying ${plural(items.length, 'photo')}…`);
+  try {
+    const { results, failures, unsent, stopped } = await uploadPhotoBatch(sessionId, items, setProgress, (index, state, detail) => markRowFromResult(rows[index], state, detail));
+    const remaining = [...failures.map(f => f.item), ...unsent];
+    if (remaining.length) {
+      lastUpload = { sessionId, items: remaining, rows: remaining.map(item => rows[items.indexOf(item)]) };
+      retryUploadBtn.textContent = stopped ? `Send ${remaining.length} remaining` : `Retry ${remaining.length} failed`;
+      setStatus(stopped ? `Stopped. ${results.length} sent, ${remaining.length} left — retry below.` : `${results.length} sent. ${remaining.length} still failing — ${failures[0]?.message || ''}`, true, stopped ? 'warning' : '');
+    } else {
+      clearLastUpload();
+      setStatus('All caught up — faces are indexing.');
+      window.SOI?.splash?.({ at: retryUploadBtn, symbol: 'stamp-sunburst', count: 6 });
+    }
+    loadDashboard(true);
+  } catch (err) {
+    setStatus(err.message || 'Retry failed.', true);
+  } finally {
+    cancelled = false;
+    uploadBusy = false;
+    document.querySelectorAll('#uploadForm input, #uploadForm button').forEach(control => { control.disabled = false; });
+    signOutBtn.disabled = false;
+    hideProgress();
   }
 });
 
