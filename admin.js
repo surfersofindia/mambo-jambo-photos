@@ -249,12 +249,12 @@ const STAMP_PATHS = typeof Path2D === 'function' ? [
   'M8 78c10-3 18-2 28-8 8-5 13-13 12-24-1-9-8-17-18-18 12-4 26 1 31 13 4 10 1 22-6 30 9-2 16-8 20-16 5-11 2-24-6-32 14 4 24 17 22 33-2 17-16 29-33 30 6 0 12-1 18-3-9 6-21 8-32 6-12-2-24-3-36-1z',
   'M6 86h60c2 0 2 3 0 3H6c-2 0-2-3 0-3zm10 6h34c2 0 2 3 0 3H16c-2 0-2-3 0-3z',
 ].map(d => new Path2D(d)) : [];
-// Guests see this preview until they pay, so it is deliberately useless anywhere else: 800 px on
+// Guests see this preview until they pay, so it is deliberately useless anywhere else: 300 px on
 // the long edge, blurred, then a dense low-alpha diagonal text lattice drawn sharp on top so it can't
 // be cropped away, plus the brand stamp in the corner so shares look branded rather than "sample".
-// A surfer can still tell it's them; nobody can print it. A 360 px thumbnail (drawn from the
-// finished canvas) rides along so grids don't load the 800 px file.
-const PREVIEW_MAX = 800;
+// A surfer can still tell it's them; nobody can print it. A 200 px thumbnail (drawn from the
+// finished canvas) rides along so grids don't load the 300 px file.
+const PREVIEW_MAX = 300;
 const PREVIEW_BLUR_PX = 2.2;
 async function watermarkedPreview(file) {
   const img = await imageFromFile(file);          // ImageBitmap or HTMLImageElement — both expose width/height
@@ -305,7 +305,7 @@ async function watermarkedPreview(file) {
     ctx.restore();
   }
   const preview = await toJpeg(canvas, .7);
-  const thumbScale = Math.min(1, 360 / Math.max(canvas.width, canvas.height));
+  const thumbScale = Math.min(1, 200 / Math.max(canvas.width, canvas.height));
   const small = document.createElement('canvas');
   small.width = Math.max(1, Math.round(canvas.width * thumbScale)); small.height = Math.max(1, Math.round(canvas.height * thumbScale));
   small.getContext('2d').drawImage(canvas, 0, 0, small.width, small.height);
@@ -792,7 +792,7 @@ async function loadDashboard(silent = false) {
               <div class="card-more-menu">
                 <button class="btn-sm edit-session-btn" data-session-id="${escHtml(s.id)}" data-title="${escHtml(s.title)}" data-date="${escHtml(s.date || '')}" data-location="${escHtml(s.location || '')}" data-price="${priceRs}" data-status="${escHtml(s.status)}">Edit</button>
                 ${failed > 0 && pending === 0 ? `<button class="btn-sm btn-retry retry-failed-btn" data-session-id="${escHtml(s.id)}">Retry ${failed} failed</button>` : ''}
-                <button class="btn-sm reindex-btn" data-session-id="${escHtml(s.id)}" ${pending > 0 ? 'disabled' : ''}>${pending > 0 ? 'Indexing…' : 'Re-index'}</button>
+                <button class="btn-sm reindex-btn" data-session-id="${escHtml(s.id)}">Force reindex</button>
                 ${s.status === 'archived' ? `<button class="btn-sm restore-session-btn" data-session-id="${escHtml(s.id)}">Restore</button>` : ''}
                 <button class="delete-btn" data-session-id="${escHtml(s.id)}">Delete</button>
               </div>
@@ -974,9 +974,10 @@ document.getElementById('dashboardGrid').addEventListener('click', async (e) => 
     return;
   }
 
-  // Reindex Session
+  // Force Reindex Session — reprocesses every photo in the session, even ones already indexed.
   const reindexBtn = e.target.closest('.reindex-btn');
   if (reindexBtn) {
+    if (!await confirmAction({ title: 'Force reindex this session?', copy: 'Reprocesses every photo — including ones already indexed or still mid-run — and replaces their face and appearance data. Takes a while for big sessions.', confirmLabel: 'Force reindex' })) return;
     reindexBtn.disabled = true;
     reindexBtn.textContent = 'Queuing…';
     try {
@@ -987,7 +988,7 @@ document.getElementById('dashboardGrid').addEventListener('click', async (e) => 
       notifyCrew(err.message, 'error');
     } finally {
       reindexBtn.disabled = false;
-      reindexBtn.textContent = 'Re-index';
+      reindexBtn.textContent = 'Force reindex';
     }
     return;
   }

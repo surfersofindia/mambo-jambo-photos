@@ -374,14 +374,16 @@ async function extractFaces(file, env) {
     : null;
   return { faces, capturedAt, appearance };
 }
-async function enqueuePhotos(photos, env) {
+async function enqueuePhotos(photos, env, { force = false } = {}) {
   if (!env.INDEX_QUEUE) throw new RequestError('Photo processing is not configured. Please contact the crew.', 503);
   let queued = 0, alreadyQueued = 0, failed = 0;
   for (const photo of photos) {
     const jobId = id();
+    // `force` overrides a job that's still queued/processing — a stale consumer will notice its job_id
+    // no longer matches the row and ack without writing, so the new job always wins the re-run.
     const claim = await env.DB.prepare(`INSERT INTO indexing_jobs (photo_id, job_id, status) VALUES (?, ?, 'queued')
       ON CONFLICT(photo_id) DO UPDATE SET job_id = excluded.job_id, status = 'queued', attempts = 0, error = NULL, updated_at = CURRENT_TIMESTAMP
-      WHERE indexing_jobs.status NOT IN ('queued', 'processing')`).bind(photo.id, jobId).run();
+      ${force ? '' : "WHERE indexing_jobs.status NOT IN ('queued', 'processing')"}`).bind(photo.id, jobId).run();
     if (!claim.meta?.changes) { alreadyQueued++; continue; }
     try {
       await env.DB.prepare("UPDATE photos SET indexing_status = 'pending' WHERE id = ?").bind(photo.id).run();
@@ -981,7 +983,7 @@ export default {
         const photos = await env.DB.prepare(`SELECT id, object_key FROM photos WHERE session_id = ?${onlyFailed ? " AND indexing_status = 'failed'" : ''}`).bind(sessionId).all();
         const session = await env.DB.prepare('SELECT id FROM sessions WHERE id = ?').bind(sessionId).first();
         if (!session) return error('Session not found.', request, env, 404);
-        return response(await enqueuePhotos(photos.results, env), request, env, 202);
+        return response(await enqueuePhotos(photos.results, env, { force: !onlyFailed }), request, env, 202);
       }
 
       // PUT /api/admin/sessions/:id - Update session details or status
