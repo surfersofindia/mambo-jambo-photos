@@ -1,0 +1,213 @@
+/* ============================================================================
+   SURFERS OF INDIA — Design tokens & brand components (v1)
+   SHARED design system: tokens + shared components only (toast, chip, empty
+   state, loader, action bar). Page styling lives in site.css / admin-theme.css,
+   which consume these tokens. Load this FIRST on both pages.
+   ---------------------------------------------------------------------------
+   Palette is extracted from the linocut kit and contrast-checked (WCAG AA):
+     umber on linen 13.5:1 · terracotta on linen 4.9:1 · white on terracotta 5.8:1
+     white on slate-deep 5.3:1 · slate-deep on linen 4.5:1 · ochre-deep on linen 4.0:1
+   Raw slate (#7B9BB4) and raw ochre (#B9975B) are DECORATIVE ONLY — never text.
+   ========================================================================== */
+:root{
+  /* ── Brand hues ─────────────────────────────────────────────────────── */
+  --soi-terracotta:#A8482C;        /* primary accent: CTAs, active, focus ring, badges */
+  --soi-terracotta-deep:#8A3A22;   /* hover / pressed */
+  --soi-terracotta-tint:#F4E4DC;   /* soft fills, selected rows, toast bg */
+  --soi-slate:#7B9BB4;             /* secondary accent (decorative): board silhouette, tag fills */
+  --soi-slate-deep:#4E6F88;        /* secondary buttons (solid), metadata text */
+  --soi-slate-tint:#E3ECF2;        /* filter chips, active toggles bg */
+  --soi-ochre:#B9975B;             /* supporting neutral: outlines, dividers, hover fills */
+  --soi-ochre-deep:#8C6E3A;        /* ochre as (bold) text only */
+  --soi-sand:#E7DCC2;              /* card outlines, tag backgrounds */
+  --soi-sand-deep:#D9CBA6;         /* hover on sand */
+  --soi-canvas:#FCFAF6;            /* page background: warm white (linen was too heavy as a canvas) */
+  --soi-linen:#F2ECDB;             /* tinted panels, ticker, badges, notices */
+  --soi-surface:#FFFDF8;           /* cards, inputs, dialogs: warm near-white — pure #FFF reads plastic beside linen */
+  --soi-dusk:#22313D;              /* lightbox & dark overlays: coastal dusk, not black */
+  --soi-umber:#2B2018;             /* headings, body, dark footer */
+  --soi-umber-soft:#5C4F43;        /* muted copy (6.7:1 on linen) */
+  --soi-coral:#B66B78;             /* reef pink: decorative fills, ticker stars */
+  --soi-coral-deep:#9A5563;        /* pink as text / solid button (4.6:1 on canvas) */
+  --soi-coral-tint:#F5E6E8;        /* favourite chips, draft badges */
+  --soi-plum:#5A2E3A;              /* deep accent for dark surfaces */
+
+  /* ── Semantic aliases: the existing stylesheets already read these ──── */
+  --white:var(--soi-surface);
+  --bg:var(--soi-canvas);
+  --bg-tint:var(--soi-linen);
+  --surface:var(--soi-surface);
+  --ink:var(--soi-umber);
+  --text:var(--soi-umber);
+  --muted:var(--soi-umber-soft);
+  --line:#E9E1CE;
+  --line-soft:#F1EBDC;
+  --border:var(--soi-sand);
+  --ocean:var(--soi-terracotta);        /* every "ocean" CTA becomes terracotta */
+  --ocean-hover:var(--soi-terracotta-deep);
+  --sky:var(--soi-slate-deep);          /* secondary: progress bar, step numbers */
+  --marker:var(--soi-terracotta);       /* admin: active tab, drop-zone hover */
+  --coral:var(--soi-terracotta-deep);   /* admin: danger buttons keep a warm, darker red */
+  --sage:var(--soi-slate);
+  --cream:var(--soi-linen);
+  --sand:var(--soi-sand);
+  --error:#9C3B24;  --error-bg:#F6E3DC;
+  --success:#3F6B4F; --success-bg:#E6EEE4;
+  --warning:#8C6E3A; --warning-bg:#F6EFDC;
+
+  /* ── Type ───────────────────────────────────────────────────────────── */
+  /* Plus Jakarta Sans stays for UI. Add Fraunces (soft, slightly hand-cut serif)
+     for display headings only — it reads like the linocut lettering without
+     being a novelty font.  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&display=swap"> */
+  --sans:'Plus Jakarta Sans',Arial,sans-serif;
+  --display:'Fraunces','Plus Jakarta Sans',Georgia,serif;
+  --mono:'Plus Jakarta Sans',ui-monospace,monospace; /* admin labels; keep the tracked-caps look */
+  --fs-eyebrow:11px; --fs-body:15px; --fs-caption:12px;
+  --lh-body:1.65;
+
+  /* ── Shape & depth ──────────────────────────────────────────────────── */
+  --radius-card:16px;     /* photos & cards: soft, not pill */
+  --radius-btn:12px;
+  --radius-chip:var(--radius-organic-sm); /* no 999px pills: chips, tabs and small buttons get the hand-cut corner */
+  --radius-input:10px;
+  --shadow-card:0 1px 2px rgba(43,32,24,.05),0 14px 34px -22px rgba(43,32,24,.25);
+  --shadow-card-hover:0 2px 4px rgba(43,32,24,.06),0 24px 48px -24px rgba(43,32,24,.32);
+  --shadow-float:0 18px 48px -16px rgba(43,32,24,.45);  /* toasts, bottom bar */
+  --ring:0 0 0 6px var(--soi-linen);   /* the halo half of :focus-visible (the ring itself is the outline) */
+
+  /* ── Motion ─────────────────────────────────────────────────────────── */
+  --ease-out:cubic-bezier(.22,1,.36,1);
+  --ease-spring:cubic-bezier(.34,1.4,.64,1);  /* lightbox open, chip select */
+  --duration-fast:140ms; --duration-base:240ms; --duration-slow:420ms;
+}
+
+/* ── Base surfaces ─────────────────────────────────────────────────────── */
+body{background:var(--soi-canvas);color:var(--soi-umber)}
+::selection{background:var(--soi-terracotta);color:#fff}
+/* :focus-visible lives in the Analog texture section below (terracotta ring + linen halo, both pages) */
+
+/* Display type: headings get the serif, everything else stays sans */
+h1,h2{font-family:var(--display);font-weight:500;letter-spacing:-.01em}
+h1 em,h2 em{font-style:italic;font-weight:500;color:var(--soi-coral-deep)}   /* pink = the emotional beat */
+.eyebrow{color:var(--soi-slate-deep)}                                           /* blue = information */
+
+/* ── Chips & badges (linocut-stamp feel: sand fill, ochre hairline) ─────── */
+.chip,.session-recent,.d-card-status,.indexing-badge,.photo-row-tag,.photo-badge{
+  display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:4px 10px;border-radius:var(--radius-chip);
+  font:600 11px/1 var(--sans);letter-spacing:.3px;text-transform:none;
+  background:var(--soi-linen);color:var(--soi-umber);border:1px solid var(--soi-sand)}
+.chip--slate,.indexing-badge.processing,.d-card-status.published{background:var(--soi-slate-tint);border-color:var(--soi-slate);color:var(--soi-slate-deep)}
+.chip--terracotta,.indexing-badge.warning{background:var(--soi-terracotta-tint);border-color:var(--soi-terracotta);color:var(--soi-terracotta-deep)}
+.chip--coral{background:var(--soi-coral-tint);border-color:var(--soi-coral);color:var(--soi-coral-deep)}
+.chip--stamp{padding-left:8px}          /* leaves room for a 16px stamp icon */
+.chip--stamp svg{width:16px;height:16px;fill:currentColor}
+/* horizontal chip rail (mobile filters) */
+.chip-rail{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x proximity;padding:4px 16px 8px;margin:0 -16px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.chip-rail::-webkit-scrollbar{display:none}
+.chip-rail .chip{scroll-snap-align:start;flex:none;min-height:40px;padding:8px 14px}
+.chip-rail .chip[aria-pressed=true]{background:var(--soi-slate-deep);border-color:var(--soi-slate-deep);color:#fff}
+
+/* ── Notices, toasts ───────────────────────────────────────────────────── */
+.notice,.admin-notice,.resume-notice{background:var(--soi-linen);border:1px solid var(--soi-sand);border-left:4px solid var(--soi-slate-deep);border-radius:var(--radius-btn);color:var(--soi-umber)}
+.status.error,.upload-status.error,.login-error{color:var(--error)}
+.upload-status.error{background:var(--error-bg);border-color:#D9A99A}
+.soi-toasts{position:fixed;left:16px;right:16px;bottom:max(16px,env(safe-area-inset-bottom));z-index:200;display:grid;gap:10px;pointer-events:none}
+@media(min-width:700px){.soi-toasts{left:auto;width:380px}}
+.soi-toast{pointer-events:auto;display:grid;grid-template-columns:22px 1fr auto;gap:12px;align-items:start;padding:14px 16px;border-radius:var(--radius-btn);
+  background:var(--soi-umber);color:var(--soi-linen);box-shadow:var(--shadow-float);border-left:4px solid var(--soi-terracotta);font:500 13px/1.5 var(--sans)}
+.soi-toast[data-kind=success]{border-left-color:#7FB08C}
+.soi-toast[data-kind=error]{border-left-color:#E07A5F}
+.soi-toast svg{width:22px;height:22px;color:var(--soi-ochre);fill:currentColor;--stamp-tilt:-5deg}  /* stamped, see .soi-stamp */
+.soi-toast button{background:none;border:0;color:var(--soi-linen);opacity:.7;min-width:44px;min-height:44px;margin:-11px -12px -11px 0}
+.soi-toast button:hover{opacity:1}
+@media(prefers-reduced-motion:no-preference){
+  .soi-toast{animation:soi-toast-in var(--duration-slow) var(--ease-spring)}
+  @keyframes soi-toast-in{from{opacity:0;transform:translateY(12px) scale(.97)}to{opacity:1;transform:none}}
+}
+
+/* ── Empty states: linocut stamp + one line ────────────────────────────── */
+.soi-empty{display:grid;justify-items:center;gap:14px;padding:44px 20px;text-align:center;color:var(--soi-umber-soft);
+  background:var(--soi-surface);border:1px dashed var(--soi-ochre);border-radius:var(--radius-organic)}
+.soi-empty svg{width:88px;height:88px;fill:var(--soi-ochre);--stamp-tilt:2deg}
+.soi-empty strong{font:500 20px/1.2 var(--display);color:var(--soi-umber)}
+.soi-empty p{margin:0;font-size:14px;max-width:34ch}
+
+/* ── Wave loader (replaces the faint tide-blob loader) ─────────────────── */
+.soi-loader{width:112px;height:64px;margin:20px auto;display:block}
+.soi-loader .crest{fill:none;stroke:var(--soi-slate-deep);stroke-width:5;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:180;stroke-dashoffset:180}
+.soi-loader .fin{fill:var(--soi-terracotta);transform-origin:56px 52px}
+body.motion-enabled .soi-loader .crest{animation:soi-crest 1.6s var(--ease-out) infinite}
+body.motion-enabled .soi-loader .fin{animation:soi-fin 1.6s var(--ease-out) infinite}
+@keyframes soi-crest{0%{stroke-dashoffset:180;opacity:0}25%{opacity:1}70%{stroke-dashoffset:0;opacity:1}100%{stroke-dashoffset:0;opacity:0}}
+@keyframes soi-fin{0%,100%{transform:translateX(-26px) rotate(-6deg)}50%{transform:translateX(26px) rotate(6deg)}}
+/* button spinner: a tiny fin instead of a ring */
+.button.is-busy span,.publish-btn.is-busy span{border:0;width:16px;height:16px;border-radius:0;
+  background:currentColor;clip-path:path('M2 15 C2 8 7 3 12 1 C10 6 11 11 14 15 Z');animation:soi-fin-spin .9s var(--ease-out) infinite}
+@keyframes soi-fin-spin{0%,100%{transform:rotate(-14deg) translateY(1px)}50%{transform:rotate(14deg) translateY(-1px)}}
+
+/* ── Sticky bottom action bar (mobile results) ─────────────────────────── */
+.soi-actionbar{position:fixed;left:0;right:0;bottom:0;z-index:40;display:none;gap:10px;align-items:center;
+  padding:10px 16px max(10px,env(safe-area-inset-bottom));background:#FFFDF8F2;backdrop-filter:blur(14px);
+  border-top:1px solid var(--soi-sand);box-shadow:0 -12px 32px -20px rgba(43,32,24,.35)}
+.soi-actionbar .button{flex:1;min-height:52px;justify-content:space-between}
+.soi-actionbar .filter-button{min-height:52px;min-width:52px;padding:0 16px}
+@media(max-width:650px){
+  .results:not([hidden]) ~ .soi-actionbar,.results:not([hidden]) .soi-actionbar{display:flex}
+  .results{padding-bottom:96px}   /* keep last row above the bar */
+  #unlockButton,#downloadAll,.results .filter-button{display:none} /* the bar owns these on phones (#downloadAllBar mirrors #downloadAll) */
+}
+
+/* ============================================================================
+   ANALOG TEXTURE & LINOCUT — the hand-printed field-guide layer
+   ---------------------------------------------------------------------------
+   Each rule kills one AI-template tell (see docs/voice-guide.md, Kill-list).
+   Hooks are applied by selector so no markup changes; the .soi-* utilities are
+   there for copy agents. Self-contained: this block + the :root tokens is the
+   "CSS Analog Texture & Linocut" snippet.
+     --soi-grain, --soi-grain-opacity  one fixed feTurbulence layer over the page, multiply, ~3.5 %
+     --radius-organic / -sm            asymmetric hand-cut corners: cards & tiles / buttons, chips, tabs
+     --stamp-ink                       colour of the hard 2px stamp shadow on primary buttons (umber; linen on dusk)
+     .soi-organic / .soi-organic--sm   utilities for the two organic radii (doubled so they beat page rules)
+     :focus-visible                    terracotta ring + linen halo, replaces every earlier focus rule
+     .soi-stamp / .soi-stamp--ink      linocut badge weight: --stamp-tilt, ink bleed, 92 % ink; --ink = block with hairline ring
+     .soi-underline / .soi-underline-svg  host + injected hand-drawn stroke (drawn by soi-fx.js)
+     .soi-splash                       SOI.splash() particle layer: fixed on body, absolute inside an open dialog
+     .soi-rule                         1px dashed ochre journal divider (for copy agents; unused so far)
+     .how-grid stagger, .how h2 em     page-owned, live in site.css
+   ========================================================================== */
+:root{
+  --soi-grain-opacity:.035;
+  /* 180px tile of fractal noise tinted umber; the colour matrix stretches the alpha so speckles read as paper tooth, not a grey wash */
+  --soi-grain:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .17 0 0 0 0 .13 0 0 0 0 .09 0 0 0 1.6 -.3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+  --radius-organic:18px 14px 20px 13px / 14px 20px 13px 18px;      /* cards, photo tiles, empty states */
+  --radius-organic-sm:14px 11px 15px 10px / 11px 15px 10px 14px;   /* buttons, chips, tabs, inputs that want it */
+  --stamp-ink:var(--soi-umber);
+}
+/* Grain: one fixed pseudo-layer, no animation, above everything but the top layer (dialogs stay crisp — they're modal, that's fine).
+   Printing skips it; z-index sits one below the soi-fx splash layer. */
+body::before{content:'';position:fixed;inset:0;z-index:2147483646;pointer-events:none;background:var(--soi-grain) 0 0/180px 180px;opacity:var(--soi-grain-opacity);mix-blend-mode:multiply}
+@media print{body::before{display:none}}
+/* Organic corners: doubled selector so the utility outranks a component radius declared later in site.css / admin-theme.css */
+.soi-organic.soi-organic{border-radius:var(--radius-organic)}
+.soi-organic--sm.soi-organic--sm{border-radius:var(--radius-organic-sm)}
+/* Focus: terracotta ring 3px out, linen halo under and 1px beyond it — visible on canvas, cards, the blue band and dusk alike */
+:focus-visible{outline:2px solid var(--soi-terracotta);outline-offset:3px;box-shadow:var(--ring)}
+/* Stamp weight: a real rubber stamp never lands square, never prints 100 % and bleeds a hair at the edge.
+   --stamp-tilt is per-use (-4°…3°); .hero-stamp keeps its own 8 % watermark opacity from soi-brand.css */
+.soi-stamp,.hero-stamp,.stamp-corner,.soi-empty svg,.soi-toast svg{display:inline-block;transform:rotate(var(--stamp-tilt,-4deg));opacity:.92;filter:drop-shadow(0 0 .4px currentColor)}
+/* Solid-block stamps (hibiscus, sunburst): a hairline linen ring set 3px inside the block, like the border of a carved lino badge.
+   outline (not inset box-shadow) because it paints above the SVG content; 8 % radius matches the symbol's rx=8 */
+.soi-stamp--ink,.login-story .stamp-corner{border-radius:8%;outline:1px solid var(--soi-linen);outline-offset:-3px}
+/* Hand-drawn underline host: soi-fx.js injects <svg class="soi-underline-svg"> with a seeded wobbly path in px units (no viewBox),
+   so 100 % width is 1:1 and the stroke never scales. Draw-in is a WAAPI animation in JS, which is where reduced motion is honoured. */
+.soi-underline{position:relative;display:inline-block}
+.soi-underline-svg{position:absolute;left:0;bottom:-.22em;width:100%;height:10px;overflow:visible;pointer-events:none}
+.soi-underline-svg path{fill:none;stroke:var(--underline-color,var(--soi-coral-deep));stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+/* Splash layer for SOI.splash(): one z-index above the grain; inside a dialog the script flips it to absolute. Particles are <svg><use> stamps. */
+.soi-splash{position:fixed;inset:0;z-index:2147483647;pointer-events:none;overflow:hidden}
+.soi-splash svg{position:absolute;overflow:visible;fill:currentColor}
+/* Journal rule: the dashed ochre line between entries in a field notebook. <hr class="soi-rule"> or any empty block. */
+.soi-rule{border:0;border-top:1px dashed var(--soi-ochre);height:0;margin:28px 0}
+
+/* ── Reduced motion ────────────────────────────────────────────────────── */
+@media(prefers-reduced-motion:reduce){.soi-loader .crest,.soi-loader .fin,.soi-toast{animation:none!important}.soi-loader .crest{stroke-dashoffset:0}}

@@ -19,8 +19,8 @@ async function apiRequest(path, options = {}) {
   };
   const resp = await fetch(apiUrl(path), { ...options, headers, signal: options.signal || AbortSignal.timeout(90000) });
   const body = await resp.json().catch(() => ({}));
-  if (resp.status === 401) { clearToken(); showLogin(); throw new Error('Your crew session expired. Please sign in again.'); }
-  if (!resp.ok) throw new Error(body.error || 'Something went wrong.');
+  if (resp.status === 401) { clearToken(); showLogin(); throw new Error('Signed out — sign in again.'); }
+  if (!resp.ok) throw new Error(body.error || "That didn't work. Try again?");
   return body;
 }
 
@@ -30,12 +30,48 @@ const loginScreen = document.getElementById('loginScreen');
 const adminApp    = document.getElementById('adminApp');
 const signOutBtn  = document.getElementById('signOutBtn');
 
+// ── Toasts ────────────────────────────────────────────────────────────────────
+
+// Action results used to land in #adminNotice above the tabs — off-screen whenever the crew is
+// scrolled into a long session list. A fixed stack is always in view. Open dialogs paint in the
+// top layer, above any fixed element, so the stack moves into whichever dialog is open.
+const toastRoot = Object.assign(document.createElement('div'), { className: 'soi-toasts' });
+toastRoot.setAttribute('aria-live', 'polite');
+document.body.append(toastRoot);
+const TOAST_ICON = { info: 'stamp-wave', success: 'stamp-sunburst', error: 'stamp-coral' };
+function toast(message, kind = 'info', { timeout = kind === 'error' ? 9000 : 5000, action } = {}) {
+  const el = document.createElement('div'); el.className = 'soi-toast'; el.dataset.kind = kind;
+  el.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+  el.innerHTML = `<svg aria-hidden="true"><use href="soi-stamps.svg#${TOAST_ICON[kind] || TOAST_ICON.info}"/></svg><div></div><button type="button" aria-label="Dismiss">×</button>`;
+  const body = el.children[1]; body.textContent = message;
+  if (action) {
+    const run = document.createElement('button'); run.type = 'button'; run.textContent = action.label;
+    run.style.cssText = 'min-width:0;min-height:0;margin:4px 0 0;padding:10px 0;font:inherit;text-decoration:underline;opacity:1';
+    run.addEventListener('click', () => { el.remove(); action.run(); });
+    body.append(document.createElement('br'), run);
+  }
+  el.lastElementChild.addEventListener('click', () => el.remove());
+  const host = [...document.querySelectorAll('dialog[open]')].pop() || document.body;
+  if (toastRoot.parentNode !== host) host.append(toastRoot);
+  toastRoot.append(el);
+  if (timeout) setTimeout(() => el.remove(), timeout);
+  return el;
+}
+// `kind` is explicit ('info' | 'success' | 'error'): errors are announced assertively and shown
+// longer, successes get the sunburst stamp. Nothing is inferred from the wording. The login screen
+// has no toasts — its inline error slot takes the message instead.
+function notifyCrew(message, kind = 'info') {
+  if (!loginScreen.classList.contains('hidden')) { document.getElementById('loginError').textContent = message; return; }
+  toast(String(message ?? ''), kind);
+}
+
 // ── Routing: show login or app ────────────────────────────────────────────────
 
 function showApp() {
   loginScreen.classList.add('hidden');
   adminApp.classList.remove('hidden');
   signOutBtn.classList.remove('hidden');   // show sign-out in topbar
+  armIdle(); startHealth();
   // Set today's date as default
   const dateInput = document.getElementById('adminDate');
   if (!dateInput.value) { const now = new Date(); dateInput.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`; }
@@ -43,8 +79,9 @@ function showApp() {
 }
 
 function showLogin() {
-  // Stop any running auto-refresh
+  // Stop any running auto-refresh, the idle clock and the health poll
   if (dashInterval) { clearInterval(dashInterval); dashInterval = null; }
+  disarmIdle(); stopHealth({ hide: true });
   adminApp.classList.add('hidden');
   loginScreen.classList.remove('hidden');
   signOutBtn.classList.add('hidden');
@@ -74,8 +111,8 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
   const passwordEl = document.getElementById('adminPassword');
   const btn = e.currentTarget.querySelector('button[type="submit"]');
   errorEl.textContent = '';
-  btn.disabled = true;
-  btn.textContent = 'Signing in…';
+  btn.disabled = true; btn.classList.add('is-busy');
+  btn.innerHTML = 'Signing in… <span></span>';
 
   try {
     const result = await fetch(apiUrl('/api/admin/login'), {
@@ -85,16 +122,16 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
       signal: AbortSignal.timeout(20000),
     });
     const body = await result.json().catch(() => ({}));
-    if (!result.ok) throw new Error(body.error || (result.status === 401 ? 'Incorrect password.' : 'The photo service is unavailable. Please try again.'));
-    if (typeof body.token !== 'string' || !body.token) throw new Error('Sign-in could not be completed. Please refresh and try again.');
+    if (!result.ok) throw new Error(body.error || (result.status === 401 ? 'Wrong password.' : result.status === 429 ? 'Too many tries. Wait 15 minutes.' : 'Photo service is down. Try again?'));
+    if (typeof body.token !== 'string' || !body.token) throw new Error("Sign-in didn't complete. Refresh and try again.");
     setToken(body.token);
     passwordEl.value = '';
     showApp();
   } catch (err) {
-    errorEl.textContent = err.name === 'TimeoutError' ? 'Sign-in took too long. Please try again.' : err instanceof TypeError ? 'Cannot reach the photo service. Check your connection and try again.' : err.message;
+    errorEl.textContent = err.name === 'TimeoutError' ? 'Sign-in timed out. Try again?' : err instanceof TypeError ? "Can't reach the photo service. Check your connection." : err.message;
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = 'Enter studio <span>→</span>';
+    btn.disabled = false; btn.classList.remove('is-busy');
+    btn.innerHTML = "Let's go";
   }
 });
 
@@ -128,17 +165,54 @@ const editSessionModal  = document.getElementById('editSessionModal');
 const closeEditModal    = document.getElementById('closeEditModal');
 const uploadMoreModal   = document.getElementById('uploadMoreModal');
 const closeMoreModal    = document.getElementById('closeMoreModal');
+const confirmDialog     = document.getElementById('confirmDialog');
 
-function openModal(modal) { modal.querySelector('.modal-notice')?.remove(); modal.classList.remove('hidden'); if (!modal.open) modal.showModal(); }
-[photoGalleryModal, editSessionModal, uploadMoreModal].forEach(modal => {
-  modal.addEventListener('close', () => modal.classList.add('hidden'));
-  modal.addEventListener('click', event => { if (event.target === modal && !uploadBusy) modal.close(); });
-  // Escape must not abandon an upload that is still sending files.
-  modal.addEventListener('cancel', event => { if (uploadBusy) event.preventDefault(); });
+function openModal(modal) { modal.classList.remove('hidden'); if (!modal.open) modal.showModal(); }
+// The edit form remembers what it opened with so an accidental backdrop click / Escape can't
+// silently discard typed changes.
+let editSnapshot = '';
+const editFormState = () => ['editTitle', 'editDate', 'editLocation', 'editPrice', 'editStatus'].map(id => document.getElementById(id).value).join('\u0000');
+const editIsDirty = () => editSessionModal.open && editFormState() !== editSnapshot;
+async function closeEditSafely() {
+  if (editIsDirty() && !await confirmAction({ title: 'Discard changes?', copy: 'You have unsaved edits to this session.', confirmLabel: 'Discard' })) return false;
+  editSessionModal.close(); return true;
+}
+[photoGalleryModal, editSessionModal, uploadMoreModal, confirmDialog].forEach(modal => {
+  modal.addEventListener('close', () => { modal.classList.add('hidden'); if (toastRoot.parentNode === modal) document.body.append(toastRoot); });
+  modal.addEventListener('click', event => {
+    if (event.target !== modal || (uploadBusy && modal !== confirmDialog)) return;
+    if (modal === editSessionModal) { closeEditSafely(); return; }
+    modal.close();
+  });
+  // Escape must not abandon an upload that is still sending files, or drop unsaved edits. The
+  // confirm dialog is exempt so "Stop uploading?" can itself be backed out of.
+  modal.addEventListener('cancel', event => { if (uploadBusy && modal !== confirmDialog) event.preventDefault(); if (modal === editSessionModal && editIsDirty()) { event.preventDefault(); closeEditSafely(); } });
 });
 closeGalleryModal.addEventListener('click', () => photoGalleryModal.close());
-closeEditModal.addEventListener('click', () => editSessionModal.close());
-closeMoreModal.addEventListener('click', () => { if (!uploadBusy) uploadMoreModal.close(); });
+closeEditModal.addEventListener('click', () => closeEditSafely());
+// Promise-based confirm dialog: `typed` asks the crew to type a phrase before a destructive action.
+let confirmResolve = null;
+function confirmAction({ title, copy, confirmLabel = 'Delete', typed = '' }) {
+  document.getElementById('confirmTitle').textContent = title;
+  document.getElementById('confirmCopy').textContent = copy;
+  const wrap = document.getElementById('confirmTypedWrap'), input = document.getElementById('confirmTypedInput'), ok = document.getElementById('confirmOkBtn');
+  wrap.hidden = !typed; input.value = ''; ok.textContent = confirmLabel; ok.disabled = Boolean(typed);
+  document.getElementById('confirmTypedLabel').textContent = typed ? `Type “${typed}” to confirm` : '';
+  input.oninput = () => { ok.disabled = input.value.trim() !== typed; };
+  confirmResolve?.(false);
+  // Enter on a stray keypress must not fire the destructive action: focus Cancel (or the typed field).
+  return new Promise(resolve => { confirmResolve = resolve; openModal(confirmDialog); (typed ? input : document.getElementById('confirmCancelBtn')).focus(); });
+}
+document.getElementById('confirmForm').addEventListener('submit', event => { event.preventDefault(); const resolve = confirmResolve; confirmResolve = null; confirmDialog.close(); resolve?.(true); });
+document.getElementById('confirmCancelBtn').addEventListener('click', () => confirmDialog.close());
+document.getElementById('closeConfirmDialog').addEventListener('click', () => confirmDialog.close());
+confirmDialog.addEventListener('close', () => { const resolve = confirmResolve; confirmResolve = null; resolve?.(false); });
+// While a batch is sending, × and Cancel offer to stop it (Escape stays blocked); otherwise they close.
+async function stopOrCloseMore() {
+  if (!uploadBusy) return uploadMoreModal.close();
+  if (await confirmAction({ title: 'Stop uploading?', copy: STOP_UPLOAD_COPY, confirmLabel: 'Stop' })) cancelUpload();
+}
+closeMoreModal.addEventListener('click', () => stopOrCloseMore());
 document.querySelector('.tabs').addEventListener('keydown', event => {
   const buttons = [...document.querySelectorAll('.tab-btn')]; const index = buttons.indexOf(document.activeElement);
   if (index < 0 || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
@@ -146,48 +220,104 @@ document.querySelector('.tabs').addEventListener('keydown', event => {
   const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
   buttons[next].focus(); buttons[next].click();
 });
-function notifyCrew(message) {
-  if (!loginScreen.classList.contains('hidden')) { document.getElementById('loginError').textContent = message; return; }
-  const modal = document.querySelector('dialog[open]');
-  let notice = document.getElementById('adminNotice');
-  if (modal) {
-    notice = modal.querySelector('.modal-notice');
-    if (!notice) { notice = document.createElement('p'); notice.className = 'admin-notice modal-notice'; notice.setAttribute('role', 'status'); modal.querySelector('.modal-body').prepend(notice); }
-  }
-  notice.textContent = message; notice.hidden = false;
-}
-
 // ── Upload: preview generation ────────────────────────────────────────────────
 
-function imageFromFile(file) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read image.')); };
-    img.src = url;
-  });
+// HEIC/HEIF is the iPhone default; its MIME type is often blank, so check the extension too.
+const isHeic = file => /image\/hei[cf]/.test(file.type) || /\.hei[cf]$/i.test(file.name);
+const imageElementFromFile = file => new Promise((resolve, reject) => {
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+  img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Couldn't read this file.")); };
+  img.src = url;
+});
+// createImageBitmap first: it decodes HEIC on Safari/macOS and downsamples *during* decode, so a
+// 24 MP frame is never allocated (small files skip the resize so they are never upscaled). <img>
+// is the fallback for browsers/formats it can't take; a HEIC that fails both fails only that file.
+async function imageFromFile(file) {
+  if (typeof createImageBitmap === 'function') {
+    try { return await createImageBitmap(file, file.size > 512 * 1024 ? { resizeWidth: PREVIEW_MAX, resizeQuality: 'high' } : {}); }
+    catch { /* fall through to the <img> path */ }
+  }
+  try { return await imageElementFromFile(file); }
+  catch { throw new Error(isHeic(file) ? "This browser can't read HEIC — use Safari or export JPEGs." : "Couldn't read this file."); }
 }
 
+const toJpeg = (canvas, quality) => new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("Couldn't build the preview.")), 'image/jpeg', quality));
+// The wave-crest stamp (soi-stamps.svg #stamp-wave, viewBox 0 0 100 100) as Path2D — no raster asset.
+const STAMP_PATHS = typeof Path2D === 'function' ? [
+  'M8 78c10-3 18-2 28-8 8-5 13-13 12-24-1-9-8-17-18-18 12-4 26 1 31 13 4 10 1 22-6 30 9-2 16-8 20-16 5-11 2-24-6-32 14 4 24 17 22 33-2 17-16 29-33 30 6 0 12-1 18-3-9 6-21 8-32 6-12-2-24-3-36-1z',
+  'M6 86h60c2 0 2 3 0 3H6c-2 0-2-3 0-3zm10 6h34c2 0 2 3 0 3H16c-2 0-2-3 0-3z',
+].map(d => new Path2D(d)) : [];
+// Guests see this preview until they pay, so it is deliberately useless anywhere else: 800 px on
+// the long edge, blurred, then a dense low-alpha diagonal text lattice drawn sharp on top so it can't
+// be cropped away, plus the brand stamp in the corner so shares look branded rather than "sample".
+// A surfer can still tell it's them; nobody can print it. A 360 px thumbnail (drawn from the
+// finished canvas) rides along so grids don't load the 800 px file.
+const PREVIEW_MAX = 800;
+const PREVIEW_BLUR_PX = 2.2;
 async function watermarkedPreview(file) {
-  const img = await imageFromFile(file);
-  const max = 1400;
-  const scale = Math.min(1, max / Math.max(img.width, img.height));
+  const img = await imageFromFile(file);          // ImageBitmap or HTMLImageElement — both expose width/height
+  const scale = Math.min(1, PREVIEW_MAX / Math.max(img.width, img.height));
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(img.width * scale);
   canvas.height = Math.round(img.height * scale);
   const ctx = canvas.getContext('2d');
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  // 1) blur, before the watermark. Canvas filters where supported (Chrome/Firefox/Safari 18+); the
+  // image bleeds past the edges so the filter's transparent falloff lands off-canvas instead of
+  // becoming a dark JPEG border. Elsewhere a cheap box blur: draw at 1/3 size and scale back up.
+  if ('filter' in ctx) {
+    const bleed = Math.ceil(PREVIEW_BLUR_PX * 3);
+    ctx.filter = `blur(${PREVIEW_BLUR_PX}px)`;
+    ctx.drawImage(img, -bleed, -bleed, canvas.width + bleed * 2, canvas.height + bleed * 2);
+    ctx.filter = 'none';
+  } else {
+    const scratch = document.createElement('canvas');
+    scratch.width = Math.max(1, Math.round(canvas.width / 3)); scratch.height = Math.max(1, Math.round(canvas.height / 3));
+    scratch.getContext('2d').drawImage(img, 0, 0, scratch.width, scratch.height);
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(scratch, 0, 0, canvas.width, canvas.height);
+  }
+  img.close?.();                                  // release the decoded bitmap right away
+  // 2) anti-crop lattice, sharp on top of the blur
   ctx.save();
   ctx.translate(canvas.width / 2, canvas.height / 2);
   ctx.rotate(-Math.PI / 7);
-  ctx.globalAlpha = .68;
-  ctx.fillStyle = '#ffffff';
-  ctx.font = `700 ${Math.max(20, Math.round(canvas.width / 18))}px Work Sans, sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.fillText('SURFERS OF INDIA  •  PREVIEW', 0, 0);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const size = Math.max(16, Math.round(canvas.width / 22));
+  ctx.font = `700 ${size}px "Plus Jakarta Sans", Arial, sans-serif`;
+  const stepY = size * 3.4, stepX = size * 10, reach = Math.hypot(canvas.width, canvas.height);
+  let row = 0;
+  for (let y = -reach; y <= reach; y += stepY, row += 1) {
+    for (let x = -reach + (row % 2 ? stepX / 2 : 0); x <= reach; x += stepX) {
+      ctx.globalAlpha = .22; ctx.fillStyle = '#2B2018'; ctx.fillText('SURFERS OF INDIA · PREVIEW', x + 1, y + 1);
+      ctx.globalAlpha = .42; ctx.fillStyle = '#F2ECDB'; ctx.fillText('SURFERS OF INDIA · PREVIEW', x, y);
+    }
+  }
   ctx.restore();
-  return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not prepare this photo for upload.')), 'image/jpeg', .82));
+  // 3) corner stamp: 11% of the width, padded by 35% of itself, bottom-right
+  if (STAMP_PATHS.length) {
+    const s = Math.round(canvas.width * .11), pad = Math.round(s * .35);
+    ctx.save();
+    ctx.translate(canvas.width - s - pad, canvas.height - s - pad); ctx.scale(s / 100, s / 100);
+    ctx.globalAlpha = .82; ctx.fillStyle = '#F2ECDB'; ctx.shadowColor = 'rgba(43,32,24,.45)'; ctx.shadowBlur = s * .15;
+    STAMP_PATHS.forEach(path => ctx.fill(path));
+    ctx.restore();
+  }
+  const preview = await toJpeg(canvas, .7);
+  const thumbScale = Math.min(1, 360 / Math.max(canvas.width, canvas.height));
+  const small = document.createElement('canvas');
+  small.width = Math.max(1, Math.round(canvas.width * thumbScale)); small.height = Math.max(1, Math.round(canvas.height * thumbScale));
+  small.getContext('2d').drawImage(canvas, 0, 0, small.width, small.height);
+  const thumb = await toJpeg(small, .72);
+  return Object.assign(preview, { thumb });
+}
+// Thumbnails ride along after the main upload. An older Worker (404) or an unmigrated database
+// (503) just means tiles keep using the preview — never fail the photo for it.
+async function uploadThumb(photoId, thumb) {
+  if (!photoId || !thumb) return;
+  try { await fetch(apiUrl(`/api/admin/photos/${photoId}/thumb`), { method: 'POST', headers: { authorization: `Bearer ${getToken()}`, 'content-type': 'image/jpeg' }, body: thumb, signal: AbortSignal.timeout(30000) }); }
+  catch { /* optional */ }
 }
 
 // ── Upload: file selection & drag/drop ────────────────────────────────────────
@@ -197,16 +327,19 @@ let uploadBusy = false;
 const dropZone = document.getElementById('adminDropZone');
 const photoInput = document.getElementById('adminPhotoInput');
 
-function setStatus(text, isError = false) {
+// `kind` ('warning') colours a heads-up that isn't a failure — "1 file left out" must not read as red.
+function setStatus(text, isError = false, kind = '') {
   const el = document.getElementById('uploadStatus');
   el.textContent = text;
   el.className = 'upload-status visible' + (isError ? ' error' : '');
+  if (kind) el.dataset.kind = kind; else delete el.dataset.kind;
 }
 
 function clearStatus() {
   const el = document.getElementById('uploadStatus');
   el.textContent = '';
   el.className = 'upload-status';
+  delete el.dataset.kind;
 }
 
 function setProgress(percent, speed, eta) {
@@ -223,25 +356,19 @@ function hideProgress() {
   document.getElementById('progressFill').style.width = '0%';
 }
 
-const UNSUPPORTED_FILES = 'Choose only JPG, PNG or WebP photos up to 25 MB each. Remove unsupported files and select again.';
-function isSupportedPhoto(file) { return ['image/jpeg', 'image/png', 'image/webp'].includes(file.type) && file.size > 0 && file.size <= 25 * 1024 * 1024; }
+const UNSUPPORTED_FILES = 'JPG, PNG, WebP or HEIC up to 25 MB each.';
+function isSupportedPhoto(file) { return (['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || isHeic(file)) && file.size > 0 && file.size <= 25 * 1024 * 1024; }
 
 function selectFiles(files) {
   if (uploadBusy) return;
   const selected = [...files];
   adminFiles = selected.filter(isSupportedPhoto);
-  if (adminFiles.length !== selected.length) {
-    adminFiles = []; renderFileList();
-    setStatus(UNSUPPORTED_FILES, true);
-    return;
-  }
+  const rejected = selected.filter(file => !isSupportedPhoto(file));
   renderFileList();
-  if (adminFiles.length) {
-    setStatus(`${adminFiles.length} photo${adminFiles.length === 1 ? '' : 's'} selected. Click "Publish photo pack" to upload.`);
-    window.setTimeout(() => document.getElementById('publishBtn').scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
-  } else {
-    setStatus('No valid images selected. Choose JPG, PNG or WebP files.', true);
-  }
+  if (!adminFiles.length) { setStatus(rejected.length ? UNSUPPORTED_FILES : 'No photos in that pick. JPG, PNG, WebP or HEIC.', true); return; }
+  if (rejected.length) setStatus(`${adminFiles.length} ready. ${rejected.length} left out (JPG, PNG, WebP or HEIC up to 25 MB): ${rejected.slice(0, 3).map(file => file.name).join(', ')}${rejected.length > 3 ? '…' : ''}.`, false, 'warning');
+  else setStatus(`${plural(adminFiles.length, 'photo')} ready. Hit Publish.`);
+  window.setTimeout(() => document.getElementById('publishBtn').scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
 }
 
 // ── Upload: live per-photo rows ───────────────────────────────────────────────
@@ -255,7 +382,7 @@ function thumbnailFor(file) {
 function releaseThumbnails(files) {
   for (const file of files) { const url = thumbnailUrls.get(file); if (url) { URL.revokeObjectURL(url); thumbnailUrls.delete(file); } }
 }
-const ROW_LABELS = { waiting: 'Waiting to upload', uploading: 'Uploading…', done: 'Uploaded', failed: 'Upload failed', skipped: 'Skipped' };
+const ROW_LABELS = { waiting: 'Waiting', uploading: 'Sending…', done: 'Sent', failed: 'Failed', skipped: 'Skipped' };
 // One list row: thumbnail with a status overlay, filename + size, optional tag and trailing control.
 function photoRow(file, { tag = '', control } = {}) {
   const row = document.createElement('li'); row.className = 'photo-row'; row.dataset.state = 'waiting';
@@ -281,15 +408,17 @@ function setRowState(row, state, { tag, kind, title } = {}) {
 // Translate one upload result into a row state so both flows show identical ticks.
 function markRowFromResult(row, state, detail) {
   if (state === 'failed') return setRowState(row, 'failed', { tag: 'Failed', kind: 'error', title: detail?.message });
+  if (state === 'waiting') return setRowState(row, 'waiting', { tag: detail?.cancelled ? 'Not sent' : '' });
   if (state !== 'done') return setRowState(row, state, { tag: '' });
-  if (detail?.skipped) return setRowState(row, 'skipped', { tag: 'Already in session' });
+  if (detail?.skipped) return setRowState(row, 'skipped', { tag: 'Already here' });
   if (detail?.duplicate === 'renamed') return setRowState(row, 'done', { tag: `Saved as ${detail.filename}`, kind: 'ok' });
-  if (detail?.duplicate === 'replaced') return setRowState(row, 'done', { tag: 'Replaced existing', kind: 'ok' });
+  if (detail?.duplicate === 'replaced') return setRowState(row, 'done', { tag: 'Replaced', kind: 'ok' });
   setRowState(row, 'done', { tag: '' });
 }
 
 let queueFiles = []; // Files whose thumbnails the Upload tab list currently shows.
 function renderFileList() {
+  document.getElementById('publishBtn').disabled = uploadBusy || !adminFiles.length;
   const container = document.getElementById('fileQueue'); container.replaceChildren(); container.hidden = !adminFiles.length;
   delete container.dataset.uploading; delete container.dataset.finished;
   releaseThumbnails(queueFiles.filter(file => !adminFiles.includes(file)));
@@ -297,7 +426,7 @@ function renderFileList() {
   if (!adminFiles.length) return;
   const header = document.createElement('div'); header.className = 'file-queue-head';
   const summary = document.createElement('strong'); summary.textContent = `${adminFiles.length} photos · ${(adminFiles.reduce((sum, file) => sum + file.size, 0) / 1048576).toFixed(1)} MB`;
-  const clear = document.createElement('button'); clear.type = 'button'; clear.textContent = 'Clear selection'; clear.disabled = uploadBusy;
+  const clear = document.createElement('button'); clear.type = 'button'; clear.textContent = 'Clear'; clear.disabled = uploadBusy;
   clear.addEventListener('click', () => { adminFiles = []; photoInput.value = ''; renderFileList(); clearStatus(); });
   header.append(summary, clear); const list = document.createElement('ul'); list.className = 'photo-list';
   adminFiles.forEach((file, index) => {
@@ -308,7 +437,18 @@ function renderFileList() {
   container.append(header, list);
 }
 document.getElementById('choosePhotos').addEventListener('click', () => photoInput.click());
-window.addEventListener('beforeunload', event => { if (uploadBusy) { event.preventDefault(); event.returnValue = ''; } });
+// A selection that hasn't been published is work too: 300 picked photos vanish on a pull-to-refresh
+// or "Back to site". `leaving` lets a confirmed back-link click through without a second prompt.
+let leaving = false;
+const hasPendingWork = () => uploadBusy || adminFiles.length > 0 || Boolean(uploadMoreModal.open && moreUpload?.items?.length);
+window.addEventListener('beforeunload', event => { if (leaving || !hasPendingWork()) return; event.preventDefault(); event.returnValue = ''; });
+document.querySelector('.back-link')?.addEventListener('click', async event => {
+  if (!adminFiles.length || uploadBusy) return;   // mid-upload the native beforeunload prompt already guards the tab
+  event.preventDefault();
+  const href = event.currentTarget.href, count = adminFiles.length;
+  if (!await confirmAction({ title: 'Leave the studio?', copy: `${plural(count, 'photo')} not published yet — leaving drops ${count === 1 ? 'it' : 'them'}.`, confirmLabel: 'Leave' })) return;
+  leaving = true; window.location.assign(href);
+});
 
 photoInput.addEventListener('click', (e) => { e.target.value = null; });
 photoInput.addEventListener('change', (e) => selectFiles(e.target.files));
@@ -326,21 +466,49 @@ const UPLOAD_MAX_ATTEMPTS = 3;
 // When the Worker streams uploads straight to storage it no longer holds whole files in
 // memory, so many can run at once. Turn this on ONLY once that Worker path is deployed —
 // against an old (buffering) Worker the streaming request format fails.
-const UPLOAD_STREAMING = false;
+const UPLOAD_STREAMING = true;
 const UPLOAD_STREAM_WORKERS = 12;
+// A wall-clock timeout kills every file on a slow uplink (12 streams on a 2 Mbps hotspot ≈ 6 min a
+// file). Abort only when no bytes have moved for UPLOAD_STALL_MS; once the body is fully sent, give
+// the Worker UPLOAD_RESPONSE_MS to answer.
+const UPLOAD_STALL_MS = 30000;
+const UPLOAD_RESPONSE_MS = 90000;
+// The streams share one uplink: start modest and let the measured KB/s decide how many run at once.
+let uploadConcurrency = 4;
+function tuneConcurrency(kbps) { uploadConcurrency = kbps > 4000 ? 12 : kbps > 1500 ? 8 : kbps > 500 ? 4 : 2; }
+// Cancel: abort every in-flight request; workers stop taking new items and the batch resolves.
+let cancelled = false;
+const liveRequests = new Set();
+function cancelUpload() { if (!uploadBusy) return; cancelled = true; liveRequests.forEach(xhr => xhr.abort()); }
+const cancelledError = () => Object.assign(new Error('Stopped.'), { cancelled: true });
+const STOP_UPLOAD_COPY = "What's sent stays in the draft. Add the rest later.";
+// Preview decode gate: a 24 MP frame is ~96 MB RGBA, so 12 parallel uploads must not decode 12 at
+// once. Two at a time, independent of the network pool; a finishing decode hands its slot straight on.
+const decodeGate = (() => {
+  let active = 0; const waiting = []; const MAX = 2;
+  return async fn => {
+    if (active >= MAX) await new Promise(resolve => waiting.push(resolve)); else active += 1;
+    try { return await fn(); }
+    finally { const next = waiting.shift(); if (next) next(); else active -= 1; }
+  };
+})();
 
 // Send originals plus watermarked previews and report combined progress.
 // Each item is { file, onDuplicate? }. onItem(index, state, detail) fires as each photo starts and finishes.
-// Resolves with per-file results and failures.
+// Resolves with per-file results and failures, plus `stopped` and the `unsent` items after a cancel.
 async function uploadPhotoBatch(sessionId, items, onProgress, onItem = () => {}) {
   const totalBytes = items.reduce((sum, item) => sum + item.file.size, 0);
   const startTime = performance.now();
   const fileProgress = new Array(items.length).fill(0);
+  let active = 0; const slotWaiters = [];
+  const wakeSlots = () => slotWaiters.splice(0).forEach(resolve => resolve());
   const report = () => {
     const uploaded = fileProgress.reduce((a, b) => a + b, 0);
     const elapsed = (performance.now() - startTime) / 1000;
     const speed = (uploaded / 1024) / Math.max(elapsed, 0.1);
     const remaining = Math.max(0, totalBytes - uploaded) / 1024;
+    // The first seconds are ramp-up noise; after that the link speed sets the pool size.
+    if (elapsed >= 3 && uploaded > 0) { const before = uploadConcurrency; tuneConcurrency(speed); if (uploadConcurrency > before) wakeSlots(); }
     onProgress(Math.round((uploaded / totalBytes) * 100), speed, speed > 0 ? `ETA: ${Math.ceil(remaining / speed)}s` : '');
   };
 
@@ -365,20 +533,22 @@ async function uploadPhotoBatch(sessionId, items, onProgress, onItem = () => {})
       xhr.open('POST', apiUrl(`/api/admin/sessions/${sessionId}/photos`));
       xhr.setRequestHeader('authorization', `Bearer ${getToken()}`);
     }
-    xhr.timeout = 120000;
     const failRetryable = (message) => reject(Object.assign(new Error(message), { retryable: true }));
-    xhr.ontimeout = () => failRetryable('Upload timed out.');
-    xhr.onabort = () => reject(new Error('Upload cancelled.'));
+    let stall = null, stallReason = 'Stalled — nothing sent for 30 s.';
+    const watch = (ms) => { clearTimeout(stall); stall = setTimeout(() => xhr.abort(), ms); };
+    xhr.onabort = () => cancelled ? reject(cancelledError()) : failRetryable(stallReason);
     xhr.upload.onprogress = (ev) => {
+      watch(UPLOAD_STALL_MS);                     // bytes moved: push the stall deadline out
       if (!ev.lengthComputable) return;
       fileProgress[index] = Math.min(item.file.size, item.file.size * ev.loaded / ev.total);
       report();
     };
+    xhr.upload.onload = () => { stallReason = 'Timed out.'; watch(UPLOAD_RESPONSE_MS); };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         fileProgress[index] = item.file.size; report();
         try { resolve(JSON.parse(xhr.responseText)); }
-        catch { reject(new Error('Invalid upload response.')); }
+        catch { reject(new Error('Bad reply from the photo service.')); }
       } else {
         let detail = `HTTP ${xhr.status}`;
         try { detail = JSON.parse(xhr.responseText).error || detail; } catch { /* Non-JSON gateway response. */ }
@@ -386,14 +556,17 @@ async function uploadPhotoBatch(sessionId, items, onProgress, onItem = () => {})
         reject(Object.assign(new Error(detail), { retryable: xhr.status >= 500 }));
       }
     };
-    xhr.onerror = () => failRetryable('Network error.');
+    xhr.onerror = () => failRetryable('Network dropped.');
+    xhr.onloadend = () => { clearTimeout(stall); liveRequests.delete(xhr); };
+    liveRequests.add(xhr); watch(UPLOAD_STALL_MS);
     xhr.send(body);
   });
 
-  // Retry transient failures (network drop / timeout / overloaded Worker) a couple of times.
-  const uploadWithRetry = async (item, index) => {
+  // Retry transient failures (network drop / stall / overloaded Worker) a couple of times.
+  const uploadWithRetry = async (item, index, preview) => {
     for (let attempt = 1; ; attempt += 1) {
-      try { return await uploadOne(item, await watermarkedPreview(item.file), index); }
+      if (cancelled) throw cancelledError();
+      try { return await uploadOne(item, preview, index); }
       catch (error) {
         if (!error.retryable || attempt >= UPLOAD_MAX_ATTEMPTS) throw error;
         await new Promise(resolve => setTimeout(resolve, 700 * attempt));
@@ -418,20 +591,31 @@ async function uploadPhotoBatch(sessionId, items, onProgress, onItem = () => {})
     }
   };
 
-  onProgress(0, 0, 'calculating...');
+  onProgress(0, 0, 'starting…');
   const queue = items.map((item, index) => ({ item, index }));
   const results = []; const failures = [];
+  // Spawn the full pool; a worker only takes an item while the live limit allows, so a downgrade to
+  // 2 streams bites mid-batch and an upgrade to 12 wakes the idle ones. Cancel drains the pool.
+  const limit = () => UPLOAD_STREAMING ? uploadConcurrency : workerCount;
   await Promise.all(Array.from({ length: Math.min(workerCount, queue.length) }, async () => {
-    while (queue.length) {
+    while (queue.length && !cancelled) {
+      if (active >= limit()) { await new Promise(resolve => slotWaiters.push(resolve)); continue; }
+      active += 1;
       const { item, index } = queue.shift();
       await acquire(item.file.size);
       onItem(index, 'uploading');
-      try { const result = await uploadWithRetry(item, index); results.push(result); onItem(index, 'done', result); }
-      catch (error) { failures.push({ item, message: `${item.file.name}: ${error.message}` }); onItem(index, 'failed', error); }
-      finally { release(item.file.size); }
+      try {
+        if (cancelled) throw cancelledError();
+        const preview = await decodeGate(() => watermarkedPreview(item.file));
+        if (cancelled) throw cancelledError();
+        const result = await uploadWithRetry(item, index, preview); results.push(result); onItem(index, 'done', result);
+        if (result?.photoId && !result.skipped) await uploadThumb(result.photoId, preview.thumb);
+      }
+      catch (error) { failures.push({ item, message: `${item.file.name}: ${error.message}` }); onItem(index, error.cancelled ? 'waiting' : 'failed', error); }
+      finally { release(item.file.size); active -= 1; wakeSlots(); }
     }
   }));
-  return { results, failures };
+  return { results, failures, stopped: cancelled, unsent: queue.map(entry => entry.item) };
 }
 
 // ── Upload: publish ───────────────────────────────────────────────────────────
@@ -439,18 +623,28 @@ async function uploadPhotoBatch(sessionId, items, onProgress, onItem = () => {})
 document.getElementById('uploadForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (uploadBusy) return;
-  if (!adminFiles.length) return setStatus('Choose at least one photo before publishing.', true);
+  if (!adminFiles.length) return setStatus('Drop at least one photo first.', true);
 
   const publishBtn = document.getElementById('publishBtn');
   const queueEl = document.getElementById('fileQueue');
   const rows = [...queueEl.querySelectorAll('.photo-row')];
   uploadBusy = true;
-  document.querySelectorAll('#uploadForm input, #uploadForm button').forEach(control => { control.disabled = true; });
+  // Everything in the form locks except the cancel button inside the progress card.
+  document.querySelectorAll('#uploadForm input, #uploadForm button:not(#cancelUploadBtn)').forEach(control => { control.disabled = true; });
   signOutBtn.disabled = true;
   queueEl.dataset.uploading = 'true';
   publishBtn.disabled = true;
-  publishBtn.innerHTML = 'Publishing…';
+  publishBtn.innerHTML = 'Publishing… <span></span>'; publishBtn.classList.add('is-busy');
   hideProgress();
+  // Leave the ticked list on screen; "Clear list" or a new selection resets it.
+  const leaveTickedList = (done, label) => {
+    adminFiles = [];
+    photoInput.value = '';
+    queueEl.dataset.finished = 'true';
+    queueEl.querySelector('.file-queue-head strong').textContent = `${done} of ${rows.length} photo${rows.length === 1 ? '' : 's'} ${label}`;
+    queueEl.querySelector('.file-queue-head button').textContent = 'Clear';
+    setProgress(100, 0, '');
+  };
 
   try {
     const title = document.getElementById('adminTitle').value.trim();
@@ -458,6 +652,9 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
     const location = document.getElementById('adminLocation').value.trim();
     const pricePaise = Math.round(Number(document.getElementById('adminPrice').value) * 100);
 
+    // Pre-flight with the cheapest authenticated GET: an expired token is caught here, not after a
+    // draft exists and 300 uploads have started failing one by one.
+    await apiRequest('/api/admin/dashboard');
     const create = await apiRequest('/api/admin/sessions', {
       method: 'POST',
       body: JSON.stringify({ title, date, location, pricePaise }),
@@ -465,52 +662,72 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
 
     const sessionId = create.session.id;
     setStatus(`Uploading ${adminFiles.length} photo${adminFiles.length === 1 ? '' : 's'}…`);
-    const { results, failures } = await uploadPhotoBatch(sessionId, adminFiles.map(file => ({ file })), setProgress, (index, state, detail) => markRowFromResult(rows[index], state, detail));
-    if (!results.length) throw new Error(`All ${failures.length} upload(s) failed. The draft is still private; open Sessions to review or delete it. ${failures[0].message}`);
+    const { results, failures, stopped } = await uploadPhotoBatch(sessionId, adminFiles.map(file => ({ file })), setProgress, (index, state, detail) => markRowFromResult(rows[index], state, detail));
+    if (stopped) {
+      // The draft stays private: what landed can be published from Sessions, the rest added via "Upload more".
+      leaveTickedList(results.length, 'in the draft');
+      setStatus(`Stopped. ${results.length} of ${rows.length} are in the draft — publish or add the rest from Sessions.`, false, 'warning');
+      hideProgress();
+      return;
+    }
+    if (!results.length) throw new Error(`All ${failures.length} failed. The draft is still private — check Sessions. ${failures[0].message}`);
 
     // Publish whatever uploaded successfully; failed files (if any) can be added afterwards via "Upload more".
     await apiRequest(`/api/admin/sessions/${sessionId}/publish`, { method: 'POST' });
-    // Leave the ticked list on screen; "Clear list" or a new selection resets it.
-    adminFiles = [];
-    photoInput.value = '';
-    queueEl.dataset.finished = 'true';
-    queueEl.querySelector('.file-queue-head strong').textContent = `${results.length} of ${rows.length} photo${rows.length === 1 ? '' : 's'} published`;
-    queueEl.querySelector('.file-queue-head button').textContent = 'Clear list';
-    setProgress(100, 0, '');
+    leaveTickedList(results.length, 'published');
+    window.SOI?.haptic?.([15]);
     if (failures.length) {
-      setStatus(`Published! ${results.length} of ${results.length + failures.length} photos are live. ${failures.length} upload(s) failed — open Sessions → "Upload more" on this session to retry. ${failures[0].message}`, true);
+      setStatus(`Live with ${results.length} of ${results.length + failures.length}. ${failures.length} failed — Sessions → Add photos to retry. ${failures[0].message}`, true);
     } else {
-      setStatus('Published! Your session is live. Open Sessions to follow photo processing.');
+      setStatus('Live. Faces are indexing — watch it in Sessions.');
+      window.SOI?.splash?.({ at: publishBtn, symbol: 'stamp-sunburst', count: 12 });
     }
+    flagFinishedInTitle('Live · Crew Studio');
 
     hideProgress();
   } catch (err) {
-    setStatus(err.message || 'Upload failed. Your draft session is still private.', true);
+    setStatus(err.message || 'Upload failed. The draft is still private.', true);
+    if (!isAuthenticated()) notifyCrew(err.message, 'error');   // kicked to the login screen: say why there too
     hideProgress();
   } finally {
+    cancelled = false;
     uploadBusy = false;
     document.querySelectorAll('#uploadForm input, #uploadForm button').forEach(control => { control.disabled = false; });
     signOutBtn.disabled = false;
-    publishBtn.innerHTML = 'Publish photo pack <span>→</span>';
+    publishBtn.innerHTML = 'Publish'; publishBtn.classList.remove('is-busy');
+    publishBtn.disabled = !adminFiles.length;
     delete queueEl.dataset.uploading;
     queueEl.querySelectorAll('button').forEach(control => { control.disabled = false; });
   }
+});
+
+// ── Upload: cancel ────────────────────────────────────────────────────────────
+
+document.getElementById('cancelUploadBtn')?.addEventListener('click', async event => {
+  event.preventDefault();                          // never let it submit the form it sits in
+  if (!uploadBusy) return;
+  if (!await confirmAction({ title: 'Stop uploading?', copy: STOP_UPLOAD_COPY, confirmLabel: 'Stop' })) return;
+  cancelUpload();
 });
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 let dashInterval = null;
 
+const sessionDateLabel = value => { const date = new Date(`${value}T12:00:00`); return Number.isNaN(date.getTime()) ? (value || '—') : date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }); };
 async function loadDashboard(silent = false) {
   const grid = document.getElementById('dashboardGrid');
   if (!isAuthenticated()) return;
-  if (!silent) grid.innerHTML = '<p class="loading-msg">Loading sessions...</p>';
+  // A background poll that re-renders while the crew is hovering or tabbing through a card steals
+  // their focus/hover mid-click; wait for the next tick instead.
+  if (silent && (grid.matches(':hover, :focus-within') || document.querySelector('dialog[open]'))) return;
+  if (!silent) grid.innerHTML = '<p class="loading-msg">Loading sessions…</p>';
   try {
     const requestToken = getToken();
     const { sessions } = await apiRequest('/api/admin/dashboard');
     if (!isAuthenticated() || getToken() !== requestToken) return;
     if (!sessions.length) {
-      grid.innerHTML = '<p class="empty-msg">No sessions yet. Go to the Upload tab to create one.</p>';
+      grid.innerHTML = '<p class="empty-msg">No sessions yet. Upload one.</p>';
       updateMetrics([]);
       if (dashInterval) { clearInterval(dashInterval); dashInterval = null; }
       return;
@@ -519,6 +736,7 @@ async function loadDashboard(silent = false) {
     updateMetrics(sessions);
 
     let hasPending = false;
+    const openMenu = grid.querySelector('.card-more[open]')?.closest('.d-card')?.dataset.sessionId;   // survive a silent re-render
     grid.innerHTML = sessions.map((s) => {
       const total = Number(s.total_photos || 0);
       const indexed = Number(s.indexed_photos || 0);
@@ -531,33 +749,33 @@ async function loadDashboard(silent = false) {
 
       let badgeHtml = '';
       if (total === 0) {
-        badgeHtml = `<span class="indexing-badge empty">No Photos Uploaded</span>`;
+        badgeHtml = `<span class="indexing-badge empty">Empty</span>`;
       } else if (isDone) {
-        badgeHtml = `<span class="indexing-badge done">✓ Indexing Complete</span>`;
+        badgeHtml = `<span class="indexing-badge done">Indexed</span>`;
       } else if (pending > 0) {
-        badgeHtml = `<span class="indexing-badge processing"><span class="pulse-dot"></span> Indexing (${pct}%)</span>`;
+        badgeHtml = `<span class="indexing-badge processing"><span class="pulse-dot"></span> Indexing · ${pct}%</span>`;
       } else if (failed > 0) {
-        badgeHtml = `<span class="indexing-badge warning">⚠️ ${failed} Failed</span>`;
+        badgeHtml = `<span class="indexing-badge warning">${failed} failed</span>`;
       } else {
-        badgeHtml = `<span class="indexing-badge processing">${pct}% Indexed</span>`;
+        badgeHtml = `<span class="indexing-badge processing">${pct}% indexed</span>`;
       }
 
       const priceRs = Math.round((s.price_paise ?? 70000) / 100);
 
       return `
-        <div class="d-card">
+        <div class="d-card" data-session-id="${escHtml(s.id)}">
           <div class="d-card-head">
             <span class="d-card-title">${escHtml(s.title)}</span>
             <div style="display:flex;gap:8px;align-items:center;">
               ${badgeHtml}
-              <span class="d-card-status ${s.status}">${s.status}</span>
+              <span class="d-card-status ${escHtml(s.status)}">${escHtml(s.status)}</span>
             </div>
           </div>
           <div class="d-card-stats">
-            <div><span>Date</span><strong style="font-size:13px;font-weight:500">${escHtml(s.date || '—')}</strong></div>
-            <div><span>Location</span><strong style="font-size:13px;font-weight:500">${escHtml(s.location || '—')}</strong></div>
-            <div><span>Indexing Progress</span><strong>${pct}% (${indexed} / ${total})</strong></div>
-            <div><span>Need attention</span><strong>${failed}</strong></div>
+            <div><span>Date</span><strong style="font-size:13px;font-weight:500">${escHtml(sessionDateLabel(s.date))}</strong></div>
+            <div><span>Break</span><strong style="font-size:13px;font-weight:500">${escHtml(s.location || '—')}</strong></div>
+            <div><span>Indexed</span><strong>${pct}% (${indexed} / ${total})</strong></div>
+            <div><span>Failed</span><strong>${failed}</strong></div>
             <div class="spacer"></div>
           </div>
           ${total > 0 ? `
@@ -566,15 +784,24 @@ async function loadDashboard(silent = false) {
             </div>
           ` : ''}
           <div class="action-group">
-            <button class="btn-sm btn-primary-sm view-photos-btn" data-session-id="${escHtml(s.id)}" data-session-title="${escHtml(s.title)}">📷 View Photos (${total})</button>
-            <button class="btn-sm upload-more-btn" data-session-id="${escHtml(s.id)}" data-session-title="${escHtml(s.title)}" ${s.status === 'archived' ? 'disabled title="Restore this archived session before uploading more photos."' : ''}>⬆ Upload more</button>
-            <button class="btn-sm edit-session-btn" data-session-id="${escHtml(s.id)}" data-title="${escHtml(s.title)}" data-date="${escHtml(s.date || '')}" data-location="${escHtml(s.location || '')}" data-price="${priceRs}" data-status="${s.status}">✏️ Edit</button>
-            <button class="btn-sm reindex-btn" data-session-id="${escHtml(s.id)}" ${pending > 0 ? 'disabled' : ''}>${pending > 0 ? 'Processing…' : '↻ Re-index'}</button>
-            <button class="delete-btn" data-session-id="${escHtml(s.id)}">Delete</button>
+            ${s.status === 'draft' ? `<button class="btn-sm btn-publish publish-session-btn" data-session-id="${escHtml(s.id)}" data-session-title="${escHtml(s.title)}" ${total ? '' : 'disabled title="Add photos first."'}>Publish</button>` : ''}
+            <button class="btn-sm btn-primary-sm view-photos-btn" data-session-id="${escHtml(s.id)}" data-session-title="${escHtml(s.title)}">Photos (${total})</button>
+            <button class="btn-sm upload-more-btn" data-session-id="${escHtml(s.id)}" data-session-title="${escHtml(s.title)}" ${s.status === 'archived' ? 'disabled title="Archived — restore it first."' : ''}>Add photos</button>
+            <details class="card-more">
+              <summary class="btn-sm">More</summary>
+              <div class="card-more-menu">
+                <button class="btn-sm edit-session-btn" data-session-id="${escHtml(s.id)}" data-title="${escHtml(s.title)}" data-date="${escHtml(s.date || '')}" data-location="${escHtml(s.location || '')}" data-price="${priceRs}" data-status="${escHtml(s.status)}">Edit</button>
+                ${failed > 0 && pending === 0 ? `<button class="btn-sm btn-retry retry-failed-btn" data-session-id="${escHtml(s.id)}">Retry ${failed} failed</button>` : ''}
+                <button class="btn-sm reindex-btn" data-session-id="${escHtml(s.id)}" ${pending > 0 ? 'disabled' : ''}>${pending > 0 ? 'Indexing…' : 'Re-index'}</button>
+                ${s.status === 'archived' ? `<button class="btn-sm restore-session-btn" data-session-id="${escHtml(s.id)}">Restore</button>` : ''}
+                <button class="delete-btn" data-session-id="${escHtml(s.id)}">Delete</button>
+              </div>
+            </details>
           </div>
         </div>
       `;
     }).join('');
+    if (openMenu) { const menu = grid.querySelector(`.d-card[data-session-id="${CSS.escape(openMenu)}"] .card-more`); if (menu) menu.open = true; }
 
     if (hasPending && !dashInterval && document.getElementById('tab-dashboard').classList.contains('active')) {
       dashInterval = setInterval(() => { if (!document.hidden) loadDashboard(true); }, 8000);
@@ -601,22 +828,24 @@ async function viewSessionPhotos(sessionId, sessionTitle) {
   const titleEl = document.getElementById('galleryModalTitle');
   const grid = document.getElementById('galleryGrid');
   
-  titleEl.textContent = `Photos — ${sessionTitle}`;
-  grid.innerHTML = '<p class="loading-msg">Loading session photos...</p>';
+  titleEl.textContent = sessionTitle;
+  grid.innerHTML = '<p class="loading-msg">Loading…</p>';
   openModal(modal);
 
   try {
-    const { photos } = await apiRequest(`/api/admin/sessions/${sessionId}/photos`);
+    const { photos, coverPhotoId } = await apiRequest(`/api/admin/sessions/${sessionId}/photos`);
+    grid.dataset.sessionId = sessionId;
     if (!photos.length) {
-      grid.innerHTML = '<p class="empty-msg">No photos uploaded to this session yet.</p>';
+      grid.innerHTML = '<p class="empty-msg">Nothing here yet.</p>';
       return;
     }
-    grid.innerHTML = photos.map((p) => `
-      <div class="photo-card" id="photo-card-${p.id}">
-        <img src="${p.previewUrl}" alt="${escHtml(p.filename)}" loading="lazy" />
-        <span class="photo-badge">${p.indexing_status === 'completed' ? `${p.face_count} face${Number(p.face_count) === 1 ? '' : 's'} detected` : escHtml(p.indexing_status)}</span>
-        <p class="photo-processing-note">${p.indexing_error ? escHtml(p.indexing_error) : p.indexing_status === 'completed' && !Number(p.face_count) ? 'No clear faces detected in this photo.' : p.indexing_status === 'pending' ? 'Queued or processing. Refresh to check progress.' : ''}</p>
-        <button class="photo-delete-btn" data-photo-id="${p.id}">Delete</button>
+    grid.innerHTML = `<p class="cover-hint">Pick a cover for the site — a lineup or wave shot, nothing with a recognisable face. Until then it shows the wave illustration.</p>` + photos.map((p) => `
+      <div class="photo-card${p.id === coverPhotoId ? ' is-cover' : ''}" id="photo-card-${escHtml(p.id)}" data-status="${escHtml(p.indexing_status)}">
+        <img src="${escHtml(p.thumbUrl || p.previewUrl)}" alt="${escHtml(p.filename)}" loading="lazy" decoding="async" />
+        <button class="photo-cover-btn" data-photo-id="${escHtml(p.id)}" aria-pressed="${p.id === coverPhotoId}">${p.id === coverPhotoId ? '★ Cover' : 'Set as cover'}</button>
+        <span class="photo-badge">${p.indexing_status === 'completed' ? `${p.face_count} face${Number(p.face_count) === 1 ? '' : 's'}` : escHtml(p.indexing_status)}</span>
+        <p class="photo-processing-note">${p.indexing_error ? escHtml(p.indexing_error) : p.indexing_status === 'completed' && !Number(p.face_count) ? 'No clear face.' : p.indexing_status === 'pending' ? 'Indexing — refresh to check.' : ''}</p>
+        <button class="photo-delete-btn" data-photo-id="${escHtml(p.id)}" aria-label="Delete ${escHtml(p.filename)}">Delete</button>
       </div>
     `).join('');
   } catch (err) {
@@ -625,19 +854,34 @@ async function viewSessionPhotos(sessionId, sessionTitle) {
 }
 
 document.getElementById('galleryGrid').addEventListener('click', async (e) => {
+  // Choose (or clear) the public cover photo for this session.
+  const coverBtn = e.target.closest('.photo-cover-btn');
+  if (coverBtn) {
+    const grid = document.getElementById('galleryGrid'); const sessionId = grid.dataset.sessionId;
+    const clearing = coverBtn.getAttribute('aria-pressed') === 'true';
+    grid.querySelectorAll('.photo-cover-btn').forEach(control => { control.disabled = true; });
+    try {
+      await apiRequest(`/api/admin/sessions/${sessionId}`, { method: 'PUT', body: JSON.stringify({ coverPhotoId: clearing ? null : coverBtn.dataset.photoId }) });
+      grid.querySelectorAll('.photo-card').forEach(card => { const isCover = !clearing && card.id === `photo-card-${coverBtn.dataset.photoId}`; card.classList.toggle('is-cover', isCover); const control = card.querySelector('.photo-cover-btn'); control.setAttribute('aria-pressed', String(isCover)); control.textContent = isCover ? '★ Cover' : 'Set as cover'; });
+      if (clearing) notifyCrew('Cover removed.');
+      else { notifyCrew('Cover set — on the site in a few minutes.', 'success'); window.SOI?.splash?.({ at: coverBtn, symbol: 'stamp-coconut', count: 5 }); }
+    } catch (err) { notifyCrew(err.message, 'error'); }
+    finally { grid.querySelectorAll('.photo-cover-btn').forEach(control => { control.disabled = false; }); }
+    return;
+  }
   const btn = e.target.closest('.photo-delete-btn');
   if (!btn) return;
   const photoId = btn.dataset.photoId;
-  if (!confirm('Delete this photo permanently?')) return;
+  if (!await confirmAction({ title: 'Delete this photo?', copy: 'Gone for good — including for anyone who paid for it.', confirmLabel: 'Delete' })) return;
   btn.disabled = true;
-  btn.textContent = '...';
+  btn.textContent = '…';
   try {
     await apiRequest(`/api/admin/photos/${photoId}`, { method: 'DELETE' });
     const card = document.getElementById(`photo-card-${photoId}`);
     if (card) card.remove();
     loadDashboard(true);
   } catch (err) {
-    notifyCrew(err.message);
+    notifyCrew(err.message, 'error');
     btn.disabled = false;
     btn.textContent = 'Delete';
   }
@@ -665,8 +909,8 @@ document.getElementById('editSessionForm').addEventListener('submit', async (e) 
     editSessionModal.close();
     loadDashboard();
   } catch (err) {
-    notifyCrew(err.message);
-  } finally { saveButton.disabled = false; saveButton.textContent = 'Save changes'; }
+    notifyCrew(err.message, 'error');
+  } finally { saveButton.disabled = false; saveButton.textContent = 'Save'; }
 });
 
 // ── Session Card Action Event Delegation ──────────────────────────────────────
@@ -681,7 +925,7 @@ document.getElementById('dashboardGrid').addEventListener('click', async (e) => 
   // Upload more photos into this session
   const moreBtn = e.target.closest('.upload-more-btn');
   if (moreBtn) {
-    if (uploadBusy) return notifyCrew('Wait for the current upload to finish before adding more photos.');
+    if (uploadBusy) return notifyCrew('Let this upload finish first.');
     moreUpload = { sessionId: moreBtn.dataset.sessionId, title: moreBtn.dataset.sessionTitle, items: [], duplicates: [], failedItems: [] };
     morePhotoInput.click();
     return;
@@ -696,7 +940,37 @@ document.getElementById('dashboardGrid').addEventListener('click', async (e) => 
     document.getElementById('editLocation').value = editBtn.dataset.location;
     document.getElementById('editPrice').value = editBtn.dataset.price;
     document.getElementById('editStatus').value = editBtn.dataset.status;
+    editSnapshot = editFormState();
     openModal(editSessionModal);
+    return;
+  }
+
+  // Publish a draft straight from its card (the same endpoint the upload flow uses).
+  const publishBtn = e.target.closest('.publish-session-btn');
+  if (publishBtn) {
+    publishBtn.disabled = true; publishBtn.textContent = 'Publishing…';
+    try { await apiRequest(`/api/admin/sessions/${publishBtn.dataset.sessionId}/publish`, { method: 'POST' }); window.SOI?.haptic?.([15]); notifyCrew(`“${publishBtn.dataset.sessionTitle}” is live.`, 'success'); loadDashboard(); }
+    catch (err) { notifyCrew(err.message, 'error'); publishBtn.disabled = false; publishBtn.textContent = 'Publish'; }
+    return;
+  }
+
+  const restoreBtn = e.target.closest('.restore-session-btn');
+  if (restoreBtn) {
+    restoreBtn.disabled = true; restoreBtn.textContent = 'Restoring…';
+    try { await apiRequest(`/api/admin/sessions/${restoreBtn.dataset.sessionId}`, { method: 'PUT', body: JSON.stringify({ status: 'draft' }) }); loadDashboard(); }
+    catch (err) { notifyCrew(err.message, 'error'); restoreBtn.disabled = false; restoreBtn.textContent = 'Restore'; }
+    return;
+  }
+
+  // Re-queue only the photos whose indexing failed.
+  const retryBtn = e.target.closest('.retry-failed-btn');
+  if (retryBtn) {
+    retryBtn.disabled = true; retryBtn.textContent = 'Queuing…';
+    try {
+      const res = await apiRequest(`/api/admin/sessions/${retryBtn.dataset.sessionId}/reindex?onlyFailed=1`, { method: 'POST' });
+      notifyCrew(`${res.queued || 0} queued again.${res.failed ? ` ${res.failed} couldn't queue.` : ''}`, res.queued ? 'success' : 'info');
+      loadDashboard();
+    } catch (err) { notifyCrew(err.message, 'error'); retryBtn.disabled = false; retryBtn.textContent = 'Retry failed'; }
     return;
   }
 
@@ -704,16 +978,16 @@ document.getElementById('dashboardGrid').addEventListener('click', async (e) => 
   const reindexBtn = e.target.closest('.reindex-btn');
   if (reindexBtn) {
     reindexBtn.disabled = true;
-    reindexBtn.textContent = 'Adding to queue…';
+    reindexBtn.textContent = 'Queuing…';
     try {
       const res = await apiRequest(`/api/admin/sessions/${reindexBtn.dataset.sessionId}/reindex`, { method: 'POST' });
-      notifyCrew(`${res.queued || 0} photos queued. ${res.alreadyQueued || 0} already processing.${res.failed ? ` ${res.failed} could not be queued; retry those after processing finishes.` : ''} You can leave this page; processing continues in the background.`);
+      notifyCrew(`${res.queued || 0} queued, ${res.alreadyQueued || 0} already running.${res.failed ? ` ${res.failed} couldn't queue — retry after.` : ''} You can leave, it keeps going.`, res.queued ? 'success' : 'info');
       loadDashboard();
     } catch (err) {
-      notifyCrew(err.message);
+      notifyCrew(err.message, 'error');
     } finally {
       reindexBtn.disabled = false;
-      reindexBtn.textContent = '🔄 Re-index';
+      reindexBtn.textContent = 'Re-index';
     }
     return;
   }
@@ -722,14 +996,16 @@ document.getElementById('dashboardGrid').addEventListener('click', async (e) => 
   const deleteBtn = e.target.closest('.delete-btn');
   if (deleteBtn) {
     const id = deleteBtn.dataset.sessionId;
-    if (!confirm('Delete this session and permanently remove ALL its photos from storage? This cannot be undone.')) return;
+    const card = deleteBtn.closest('.d-card'); const title = card?.querySelector('.d-card-title')?.textContent?.trim() || '';
+    const photoCount = card?.querySelector('.view-photos-btn')?.textContent.match(/\((\d+)\)/)?.[1] || '0';
+    if (!await confirmAction({ title: `Delete “${title}”?`, copy: `All ${plural(Number(photoCount), 'photo')} go${photoCount === '1' ? 'es' : ''} — including originals people paid for. No undo.`, confirmLabel: 'Delete', typed: title })) return;
     deleteBtn.disabled = true;
     deleteBtn.textContent = 'Deleting…';
     try {
       await apiRequest(`/api/admin/sessions/${id}`, { method: 'DELETE' });
       loadDashboard();
     } catch (err) {
-      notifyCrew(err.message);
+      notifyCrew(err.message, 'error');
       deleteBtn.disabled = false;
       deleteBtn.textContent = 'Delete';
     }
@@ -751,9 +1027,10 @@ let moreUpload = null; // { sessionId, title, items: [{ file, name, duplicate }]
 function storedFilename(name) { return (name || 'photo.jpg').replace(/[^a-zA-Z0-9._-]/g, '-').slice(-120); }
 const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
 
-function setMoreStatus(text, isError = false) {
+function setMoreStatus(text, isError = false, kind = '') {
   const el = document.getElementById('moreStatus');
   el.textContent = text; el.className = 'upload-status' + (text ? ' visible' : '') + (isError ? ' error' : '');
+  if (kind) el.dataset.kind = kind; else delete el.dataset.kind;
 }
 function setMoreProgress(percent, speed, eta) {
   document.getElementById('moreProgressWrap').classList.remove('hidden');
@@ -764,7 +1041,7 @@ function setMoreProgress(percent, speed, eta) {
 let moreFiles = []; // Files whose thumbnails the dialog list currently shows.
 uploadMoreModal.addEventListener('close', () => { releaseThumbnails(moreFiles); moreFiles = []; });
 function resetMoreModal() {
-  document.getElementById('moreSummary').textContent = 'Checking your selection…';
+  document.getElementById('moreSummary').textContent = 'Checking…';
   document.getElementById('morePhotos').hidden = true;
   document.getElementById('morePhotoList').replaceChildren();
   releaseThumbnails(moreFiles); moreFiles = [];
@@ -773,7 +1050,7 @@ function resetMoreModal() {
   document.getElementById('moreProgressWrap').classList.add('hidden');
   document.getElementById('moreProgressFill').style.width = '0%';
   setMoreStatus('');
-  moreConfirmBtn.disabled = true; moreConfirmBtn.innerHTML = 'Upload photos <span>→</span>';
+  moreConfirmBtn.disabled = true; moreConfirmBtn.innerHTML = 'Upload'; moreConfirmBtn.classList.remove('is-busy');
   moreCancelBtn.textContent = 'Cancel';
   moreRetryBtn.hidden = true;
   if (moreUpload) moreUpload.failedItems = [];
@@ -781,14 +1058,14 @@ function resetMoreModal() {
 
 morePhotoInput.addEventListener('click', (e) => { e.target.value = null; });
 morePhotoInput.addEventListener('change', (e) => prepareUploadMore(e.target.files));
-moreCancelBtn.addEventListener('click', () => { if (!uploadBusy) uploadMoreModal.close(); });
+moreCancelBtn.addEventListener('click', () => stopOrCloseMore());
 
 async function prepareUploadMore(fileList) {
   const files = [...fileList];
   if (!moreUpload || uploadBusy || !files.length) return;
-  if (!files.every(isSupportedPhoto)) return notifyCrew(UNSUPPORTED_FILES);
+  if (!files.every(isSupportedPhoto)) return toast(UNSUPPORTED_FILES, 'error');
   resetMoreModal();
-  document.getElementById('moreModalTitle').textContent = `Upload more — ${moreUpload.title}`;
+  document.getElementById('moreModalTitle').textContent = `Add photos — ${moreUpload.title}`;
   openModal(uploadMoreModal);
   try {
     const { photos } = await apiRequest(`/api/admin/sessions/${moreUpload.sessionId}/photos`);
@@ -804,7 +1081,7 @@ async function prepareUploadMore(fileList) {
     moreUpload.items = items; moreUpload.duplicates = items.filter(item => item.duplicate);
     renderUploadMore(repeated);
   } catch (err) {
-    document.getElementById('moreSummary').textContent = 'The existing photos could not be checked.';
+    document.getElementById('moreSummary').textContent = "Couldn't check what's already here.";
     setMoreStatus(err.message, true);
   }
 }
@@ -814,15 +1091,15 @@ function renderUploadMore(repeated) {
   const fresh = items.length - duplicates.length;
   const summary = document.getElementById('moreSummary'); summary.replaceChildren();
   const count = document.createElement('strong'); count.textContent = plural(items.length, 'photo');
-  summary.append(count, ' selected. ');
-  if (duplicates.length) summary.append(`${plural(duplicates.length, 'photo')} already exist${duplicates.length === 1 ? 's' : ''} in this session; ${fresh} ${fresh === 1 ? 'is' : 'are'} new.`);
-  else summary.append('None of them are in this session yet.');
-  if (repeated) summary.append(` ${plural(repeated, 'repeated file')} in your selection ${repeated === 1 ? 'was' : 'were'} dropped.`);
+  summary.append(count, '. ');
+  if (duplicates.length) summary.append(`${duplicates.length} already here, ${fresh} new.`);
+  else summary.append('All new.');
+  if (repeated) summary.append(` ${plural(repeated, 'duplicate')} in your pick dropped.`);
 
   // Every selected photo gets a row up front; the rows then show live upload progress.
-  document.getElementById('morePhotosTitle').textContent = duplicates.length ? `Selected photos · ${duplicates.length} already in this session` : 'Selected photos';
+  document.getElementById('morePhotosTitle').textContent = duplicates.length ? `Photos · ${duplicates.length} already here` : 'Photos';
   const list = document.getElementById('morePhotoList'); list.replaceChildren();
-  items.forEach(item => { item.row = photoRow(item.file, { tag: item.duplicate ? 'Already in session' : '' }); list.append(item.row); });
+  items.forEach(item => { item.row = photoRow(item.file, { tag: item.duplicate ? 'Already here' : '' }); list.append(item.row); });
   moreFiles = items.map(item => item.file);
   document.getElementById('morePhotos').hidden = false;
   document.getElementById('moreChoice').hidden = !duplicates.length;
@@ -838,7 +1115,7 @@ function plannedUploads() {
 }
 function updateMoreConfirmLabel() {
   const count = plannedUploads().length;
-  moreConfirmBtn.innerHTML = count ? `Upload ${plural(count, 'photo')} <span>→</span>` : 'Nothing to upload';
+  moreConfirmBtn.innerHTML = count ? `Upload ${count}` : 'Nothing to upload';
   moreConfirmBtn.disabled = !count;
   // Preview the choice: duplicates dim when they are about to be left out.
   const skipping = document.querySelector('input[name=duplicateMode]:checked')?.value === 'skip';
@@ -847,38 +1124,47 @@ function updateMoreConfirmLabel() {
 document.getElementById('moreChoice').addEventListener('change', updateMoreConfirmLabel);
 
 async function runMoreUpload(items, { skippedByChoice = 0, isRetry = false } = {}) {
-  const controls = uploadMoreModal.querySelectorAll('input, button');
+  // Everything locks except × and Cancel, which become "Stop upload" while the batch is sending.
+  const controls = [...uploadMoreModal.querySelectorAll('input, button')].filter(control => control !== moreCancelBtn && control !== closeMoreModal);
   uploadBusy = true; controls.forEach(control => { control.disabled = true; }); signOutBtn.disabled = true;
-  moreConfirmBtn.innerHTML = 'Uploading…';
+  moreConfirmBtn.innerHTML = 'Uploading… <span></span>'; moreConfirmBtn.classList.add('is-busy');
+  moreCancelBtn.textContent = 'Stop';
   if (isRetry) moreRetryBtn.textContent = 'Retrying…';
   setMoreStatus(`${isRetry ? 'Retrying' : 'Uploading'} ${plural(items.length, 'photo')}…`);
+  let stopped = false;
   try {
-    const { results, failures } = await uploadPhotoBatch(moreUpload.sessionId, items, setMoreProgress, (index, state, detail) => markRowFromResult(items[index].row, state, detail));
+    const batch = await uploadPhotoBatch(moreUpload.sessionId, items, setMoreProgress, (index, state, detail) => markRowFromResult(items[index].row, state, detail));
+    const { results, failures, unsent } = batch; stopped = batch.stopped;
     const uploaded = results.filter(result => !result.skipped);
     const replaced = uploaded.reduce((sum, result) => sum + (result.replaced || 0), 0);
     const renamed = uploaded.filter(result => result.duplicate === 'renamed');
     const skipped = results.filter(result => result.skipped).length + skippedByChoice;
-    const parts = [`${plural(uploaded.length, 'photo')} uploaded and queued for face indexing.`];
-    if (replaced) parts.push(`${plural(replaced, 'existing photo')} replaced.`);
+    const parts = [`${uploaded.length} sent${uploaded.length ? ', indexing' : ''}.`];
+    if (replaced) parts.push(`${replaced} replaced.`);
     if (renamed.length) parts.push(`${renamed.length === 1 ? '1 copy' : `${renamed.length} copies`} saved as ${renamed.slice(0, 3).map(result => result.filename).join(', ')}${renamed.length > 3 ? '…' : ''}.`);
-    if (skipped) parts.push(`${plural(skipped, 'duplicate')} skipped.`);
-    if (failures.length) parts.push(`${plural(failures.length, 'upload')} failed — ${failures[0].message}`);
-    setMoreStatus(parts.join(' '), Boolean(failures.length));
-    moreUpload.failedItems = failures.map(failure => failure.item);
-    if (!failures.length) document.getElementById('moreProgressWrap').classList.add('hidden');
+    if (skipped) parts.push(`${skipped} skipped.`);
+    if (stopped) parts.push(`Stopped — ${failures.length + unsent.length} not sent.`);
+    else if (failures.length) parts.push(`${failures.length} failed — ${failures[0].message}`);
+    setMoreStatus(parts.join(' '), Boolean(failures.length) && !stopped, stopped ? 'warning' : '');
+    if (!stopped && !failures.length) window.SOI?.splash?.({ at: moreConfirmBtn, symbol: 'stamp-sunburst', count: 8 });
+    // Aborted and never-started items both go on the retry list so one tap sends the rest.
+    moreUpload.failedItems = [...failures.map(failure => failure.item), ...unsent];
+    if (!moreUpload.failedItems.length) document.getElementById('moreProgressWrap').classList.add('hidden');
     moreUpload.items = []; moreUpload.duplicates = [];
+    if (!stopped) flagFinishedInTitle('Sent · Crew Studio');
     loadDashboard(true);
   } catch (err) {
     setMoreStatus(err.message || 'Upload failed.', true);
   } finally {
+    cancelled = false;
     uploadBusy = false; signOutBtn.disabled = false;
     controls.forEach(control => { control.disabled = false; });
-    moreConfirmBtn.disabled = true; moreConfirmBtn.innerHTML = 'Upload photos <span>→</span>';
+    moreConfirmBtn.disabled = true; moreConfirmBtn.innerHTML = 'Upload'; moreConfirmBtn.classList.remove('is-busy');
     moreCancelBtn.textContent = 'Done';
     document.getElementById('moreChoice').hidden = true;
     if (moreUpload.failedItems.length) {
       moreRetryBtn.hidden = false; moreRetryBtn.disabled = false;
-      moreRetryBtn.textContent = `Retry ${plural(moreUpload.failedItems.length, 'failed upload')}`;
+      moreRetryBtn.textContent = stopped ? `Send ${moreUpload.failedItems.length} remaining` : `Retry ${moreUpload.failedItems.length}`;
     } else {
       moreRetryBtn.hidden = true;
     }
@@ -944,14 +1230,14 @@ async function drawCroppedFaceCanvas(canvas, loadImage) {
     faceImages.set(canvas, image); renderFace(canvas); canvas.dataset.ready = 'true';
     frame.dataset.state = 'ready';
     if ([...card.querySelectorAll('canvas')].every(item => item.dataset.ready === 'true')) {
-      card.querySelector('.review-load-status').textContent = 'Compare the faces, then choose below.';
+      card.querySelector('.review-load-status').textContent = 'Your call.';
       card.querySelectorAll('[data-action="confirm"],[data-action="reject"],input[type=range]').forEach(control => { control.disabled = false; });
     }
   } catch {
     if (!canvas.isConnected) return;
     frame.dataset.state = 'error';
-    frame.querySelector('.review-image-label').textContent = 'Photo could not load';
-    card.querySelector('.review-load-status').textContent = 'A face could not load. Refresh the queue to try again.';
+    frame.querySelector('.review-image-label').textContent = "Didn't load";
+    card.querySelector('.review-load-status').textContent = "A face didn't load — refresh the queue.";
   } finally {
     frame.setAttribute('aria-busy', 'false');
   }
@@ -978,27 +1264,28 @@ async function loadVerifyQueue() {
   const grid = document.getElementById('verifyGrid');
   const version = ++reviewQueueVersion;
   reviewObserver?.disconnect();
-  grid.innerHTML = '<p class="loading-msg review-queue-loading" role="status"><span class="review-spinner" aria-hidden="true"></span>Looking for uncertain face pairs…</p>';
+  grid.innerHTML = '<p class="loading-msg review-queue-loading" role="status"><span class="review-spinner" aria-hidden="true"></span>Looking for borderline pairs…</p>';
   try {
     const { queue, stats } = await apiRequest('/api/admin/verify-queue');
     if (version !== reviewQueueVersion) return;
     document.getElementById('verifyPending').textContent = stats.pending || 0;
     const unavailable = document.getElementById('reviewUnavailable');
     unavailable.hidden = !stats.unavailable;
-    unavailable.textContent = `${stats.unavailable} saved pair(s) cannot be shown yet because face crops are missing or their photos are still processing. Re-index the affected sessions, wait for processing to finish, then scan again.`;
+    unavailable.textContent = `${plural(stats.unavailable, 'pair')} hidden — faces still indexing or crops missing. Re-index, wait, scan again.`;
     document.getElementById('verifyConfirmed').textContent = stats.confirmed || 0;
     document.getElementById('verifyRejected').textContent = stats.rejected || 0;
-    if (!queue?.length) { grid.innerHTML = '<p class="empty-msg">No uncertain face pairs available. Once photos finish processing, scan again to find pairs for review.</p>'; return; }
+    if (!queue?.length) { grid.innerHTML = '<p class="empty-msg">Nothing borderline right now. Scan again once indexing finishes.</p>'; return; }
     grid.innerHTML = queue.map(item => `
       <article class="verify-card" id="verify-card-${escHtml(item.id)}">
-        <div class="review-heading"><div><span class="eyebrow">A SECOND PAIR OF EYES</span><h3>Same person, different moment?</h3><p>${escHtml(item.sessionTitle)}</p></div><span class="review-score">Similarity ${item.similarityPct}%<small>Near the matching cutoff</small></span></div>
+        <div class="review-heading"><div><span class="eyebrow">A SECOND PAIR OF EYES</span><h3>Same surfer?</h3><p>${escHtml(item.sessionTitle)}</p></div><span class="review-score">${item.similarityPct}%<small>borderline</small></span></div>
         <div class="verify-faces">${[item.photo1, item.photo2].map((photo, index) => `
-          <figure class="review-face"><figcaption>FACE ${index === 0 ? 'A' : 'B'}</figcaption><div class="review-image-frame" data-state="waiting" aria-busy="true"><div class="review-image-loader" aria-hidden="true"><span class="review-spinner"></span><span class="review-image-label">Loading face…</span></div><canvas class="face-crop-canvas" data-photo-id="${escHtml(photo.id)}" data-img-url="${escHtml(photo.url)}" data-bbox-norm="${escHtml(JSON.stringify(photo.bboxNorm))}" width="640" height="640" role="img" aria-label="Cropped face ${index === 0 ? 'A' : 'B'} for comparison"></canvas></div><p title="${escHtml(photo.filename)}">${escHtml(photo.filename)}</p></figure>`).join('')}</div>
-        <div class="review-zoom"><label>Zoom both faces <input type="range" min="1" max="2.5" step=".1" value="1" disabled><output>1×</output></label><button type="button" data-action="reset-zoom">Reset</button></div>
-        <p class="review-load-status" role="status">Loading isolated face crops…</p>
-        <div class="verify-actions"><button class="confirm-btn" data-pair-id="${escHtml(item.id)}" data-action="confirm" disabled>✓ Same person</button><button class="reject-btn" data-pair-id="${escHtml(item.id)}" data-action="reject" disabled>✕ Different people</button><button class="review-skip" data-pair-id="${escHtml(item.id)}" data-action="skip">Not sure · skip</button></div>
+          <figure class="review-face"><figcaption>FACE ${index === 0 ? 'A' : 'B'}</figcaption><div class="review-image-frame" data-state="waiting" aria-busy="true"><div class="review-image-loader" aria-hidden="true"><span class="review-spinner"></span><span class="review-image-label">Loading…</span></div><canvas class="face-crop-canvas" data-photo-id="${escHtml(photo.id)}" data-img-url="${escHtml(photo.url)}" data-bbox-norm="${escHtml(JSON.stringify(photo.bboxNorm))}" width="640" height="640" role="img" aria-label="Face ${index === 0 ? 'A' : 'B'} crop"></canvas></div><p title="${escHtml(photo.filename)}">${escHtml(photo.filename)}</p></figure>`).join('')}</div>
+        <div class="review-zoom"><label>Zoom <input type="range" min="1" max="2.5" step=".1" value="1" disabled><output>1×</output></label><button type="button" data-action="reset-zoom">Reset</button></div>
+        <p class="review-load-status" role="status">Loading faces…</p>
+        <div class="verify-actions"><button class="confirm-btn" data-pair-id="${escHtml(item.id)}" data-action="confirm" disabled>Same</button><button class="reject-btn" data-pair-id="${escHtml(item.id)}" data-action="reject" disabled>Different</button><button class="review-skip" data-pair-id="${escHtml(item.id)}" data-action="skip">Skip</button></div>
       </article>`).join('');
     observeReviewImages(grid);
+    document.dispatchEvent(new CustomEvent('mj:queue-rendered'));
   } catch (error) { if (version === reviewQueueVersion) grid.innerHTML = `<p class="loading-msg error-msg">${escHtml(error.message)}</p>`; }
 }
 const reviewGrid = document.getElementById('verifyGrid');
@@ -1012,35 +1299,58 @@ reviewGrid.addEventListener('click', async event => {
   const button = event.target.closest('button[data-action]'); if (!button) return;
   const card = button.closest('.verify-card');
   if (button.dataset.action === 'reset-zoom') { const slider = card.querySelector('input'); slider.value = '1'; slider.dispatchEvent(new Event('input', { bubbles: true })); return; }
+  window.SOI?.haptic?.([12]);
   if (button.dataset.action === 'skip') {
-    card.remove(); if (!reviewGrid.querySelector('.verify-card')) reviewGrid.innerHTML = '<p class="empty-msg">No more pairs in this batch. Refresh to return to skipped pairs.</p>';
+    card.remove(); if (!reviewGrid.querySelector('.verify-card')) reviewGrid.innerHTML = '<p class="empty-msg">Batch done. Refresh to see skipped ones.</p>';
+    markActiveReviewCard();
     return;
   }
   card.querySelectorAll('button').forEach(control => { control.disabled = true; });
   const confirmed = button.dataset.action === 'confirm';
   try {
     await apiRequest('/api/admin/confirm-match', { method: 'POST', body: JSON.stringify({ pairId: button.dataset.pairId, confirmed }) });
-    card.remove();
+    card.remove(); markActiveReviewCard();
     const pending = document.getElementById('verifyPending'); pending.textContent = Math.max(0, Number(pending.textContent) - 1);
     const count = document.getElementById(confirmed ? 'verifyConfirmed' : 'verifyRejected'); count.textContent = Number(count.textContent) + 1;
     if (!reviewGrid.querySelector('.verify-card')) await loadVerifyQueue();
   } catch (error) { card.querySelector('.review-load-status').textContent = error.message; card.querySelectorAll('button').forEach(control => { control.disabled = false; }); }
 });
 
+// Y / N / S act on the first reviewable card in view (face pairs first, then burst/appearance links).
+// The same rule marks that card `.is-active`, so the crew can see what the keys will hit.
+const activeReviewCard = () => [...document.querySelectorAll('#verifyGrid .verify-card, #linkGrid .verify-card')].find(item => { const box = item.getBoundingClientRect(); return box.bottom > 80 && box.top < window.innerHeight; });
+function markActiveReviewCard() {
+  const active = activeReviewCard();
+  document.querySelectorAll('.verify-card.is-active').forEach(card => { if (card !== active) card.classList.remove('is-active'); });
+  active?.classList.add('is-active');
+}
+let reviewMarkFrame = 0;
+window.addEventListener('scroll', () => { if (!reviewMarkFrame) reviewMarkFrame = requestAnimationFrame(() => { reviewMarkFrame = 0; markActiveReviewCard(); }); }, { passive: true });
+document.addEventListener('mj:queue-rendered', markActiveReviewCard);
+document.addEventListener('keydown', event => {
+  if (!document.getElementById('tab-verify').classList.contains('active') || document.querySelector('dialog[open]')) return;
+  if (event.metaKey || event.ctrlKey || event.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName)) return;
+  const action = { y: 'confirm', n: 'reject', s: 'skip' }[event.key.toLowerCase()]; if (!action) return;
+  const card = activeReviewCard();
+  const button = card?.querySelector(`button[data-action="${action}"]`);
+  if (!button || button.disabled) return;
+  event.preventDefault(); button.click();
+});
+
 const rescanVerifyBtn = document.getElementById('rescanVerifyBtn');
 if (rescanVerifyBtn) {
   rescanVerifyBtn.addEventListener('click', async () => {
     rescanVerifyBtn.disabled = true;
-    rescanVerifyBtn.textContent = 'Scanning...';
+    rescanVerifyBtn.textContent = 'Scanning…';
     try {
       const res = await apiRequest('/api/admin/verify-queue/scan', { method: 'POST' });
-      notifyCrew(`✓ Borderline scan complete! Found ${res.generated || 0} candidate pair(s) for verification.`);
+      notifyCrew(`Scan done — ${plural(res.generated || 0, 'borderline pair')}.`, 'success');
       loadVerifyQueue();
     } catch (err) {
-      notifyCrew(err.message);
+      notifyCrew(err.message, 'error');
     } finally {
       rescanVerifyBtn.disabled = false;
-      rescanVerifyBtn.textContent = '🔍 Rescan Borderline Matches';
+      rescanVerifyBtn.textContent = 'Find borderline pairs';
     }
   });
 }
@@ -1055,13 +1365,13 @@ if (refreshVerifyBtn) {
 // no bbox to crop to — cards compare whole photos. Plain lazy-loaded <img> is enough; there is no
 // canvas cropping/zoom to justify the decoded-image cache the face-pair review uses.
 
-const LINK_TYPE_LABEL = { burst: ['BURST SEQUENCE', 'Shot moments apart'], appearance: ['SIMILAR OUTFIT', 'Matching clothing colors'] };
+const LINK_TYPE_LABEL = { burst: ['BURST', 'seconds apart'], appearance: ['SAME KIT', 'matching colours'] };
 let linkQueueVersion = 0;
 async function loadLinkQueue() {
   const grid = document.getElementById('linkGrid');
   if (!grid) return;
   const version = ++linkQueueVersion;
-  grid.innerHTML = '<p class="loading-msg review-queue-loading" role="status"><span class="review-spinner" aria-hidden="true"></span>Looking for burst and appearance links…</p>';
+  grid.innerHTML = '<p class="loading-msg review-queue-loading" role="status"><span class="review-spinner" aria-hidden="true"></span>Looking for links…</p>';
   try {
     const { queue, stats, trainedOn } = await apiRequest('/api/admin/link-queue');
     if (version !== linkQueueVersion) return;
@@ -1069,20 +1379,21 @@ async function loadLinkQueue() {
     document.getElementById('linkConfirmed').textContent = stats.confirmed || 0;
     document.getElementById('linkRejected').textContent = stats.rejected || 0;
     showRetrainStatus(trainedOn);
-    if (!queue?.length) { grid.innerHTML = '<p class="empty-msg">No burst or appearance links available. Photos need capture timestamps — re-index a session, then scan again.</p>'; return; }
+    if (!queue?.length) { grid.innerHTML = '<p class="empty-msg">No links yet. Needs capture times — re-index, then scan.</p>'; return; }
     grid.innerHTML = queue.map(item => {
       const [eyebrow, note] = LINK_TYPE_LABEL[item.linkType] || LINK_TYPE_LABEL.burst;
       return `
       <article class="verify-card" id="link-card-${escHtml(item.id)}">
-        <div class="review-heading"><div><span class="eyebrow">${eyebrow}</span><h3>Same person, different shot?</h3><p>${escHtml(item.sessionTitle)}</p></div><span class="review-score">${item.scorePct}% confidence<small>${note}</small></span></div>
+        <div class="review-heading"><div><span class="eyebrow">${eyebrow}</span><h3>Same surfer?</h3><p>${escHtml(item.sessionTitle)}</p></div><span class="review-score">${item.scorePct}%<small>${note}</small></span></div>
         <div class="verify-faces">${[item.photo1, item.photo2].map((photo, index) => `
-          <figure class="review-face"><figcaption>PHOTO ${index === 0 ? 'A' : 'B'}</figcaption><img class="link-photo-img" loading="lazy" src="${escHtml(photo.url)}" alt="Photo ${index === 0 ? 'A' : 'B'} for comparison"><p title="${escHtml(photo.filename)}">${escHtml(photo.filename)}</p></figure>`).join('')}</div>
-        <div class="verify-actions"><button class="confirm-btn" data-link-id="${escHtml(item.id)}" data-action="confirm">✓ Same person</button><button class="reject-btn" data-link-id="${escHtml(item.id)}" data-action="reject">✕ Different people</button><button class="review-skip" data-link-id="${escHtml(item.id)}" data-action="skip">Not sure · skip</button></div>
+          <figure class="review-face"><figcaption>PHOTO ${index === 0 ? 'A' : 'B'}</figcaption><img class="link-photo-img" loading="lazy" src="${escHtml(photo.url)}" alt="Photo ${index === 0 ? 'A' : 'B'}"><p title="${escHtml(photo.filename)}">${escHtml(photo.filename)}</p></figure>`).join('')}</div>
+        <div class="verify-actions"><button class="confirm-btn" data-link-id="${escHtml(item.id)}" data-action="confirm">Same</button><button class="reject-btn" data-link-id="${escHtml(item.id)}" data-action="reject">Different</button><button class="review-skip" data-link-id="${escHtml(item.id)}" data-action="skip">Skip</button></div>
       </article>`;
     }).join('');
     grid.querySelectorAll('.link-photo-img').forEach(img => {
       img.addEventListener('error', () => img.closest('.review-face').classList.add('link-photo-error'), { once: true });
     });
+    document.dispatchEvent(new CustomEvent('mj:queue-rendered'));
   } catch (error) { if (version === linkQueueVersion) grid.innerHTML = `<p class="loading-msg error-msg">${escHtml(error.message)}</p>`; }
 }
 const linkGrid = document.getElementById('linkGrid');
@@ -1090,19 +1401,21 @@ if (linkGrid) {
   linkGrid.addEventListener('click', async event => {
     const button = event.target.closest('button[data-action]'); if (!button) return;
     const card = button.closest('.verify-card');
+    window.SOI?.haptic?.([12]);
     if (button.dataset.action === 'skip') {
-      card.remove(); if (!linkGrid.querySelector('.verify-card')) linkGrid.innerHTML = '<p class="empty-msg">No more links in this batch. Refresh to return to skipped links.</p>';
+      card.remove(); if (!linkGrid.querySelector('.verify-card')) linkGrid.innerHTML = '<p class="empty-msg">Batch done. Refresh to see skipped ones.</p>';
+      markActiveReviewCard();
       return;
     }
     card.querySelectorAll('button').forEach(control => { control.disabled = true; });
     const confirmed = button.dataset.action === 'confirm';
     try {
       await apiRequest('/api/admin/confirm-link', { method: 'POST', body: JSON.stringify({ linkId: button.dataset.linkId, confirmed }) });
-      card.remove();
+      card.remove(); markActiveReviewCard();
       const pending = document.getElementById('linkPending'); pending.textContent = Math.max(0, Number(pending.textContent) - 1);
       const count = document.getElementById(confirmed ? 'linkConfirmed' : 'linkRejected'); count.textContent = Number(count.textContent) + 1;
       if (!linkGrid.querySelector('.verify-card')) await loadLinkQueue();
-    } catch (error) { notifyCrew(error.message); card.querySelectorAll('button').forEach(control => { control.disabled = false; }); }
+    } catch (error) { notifyCrew(error.message, 'error'); card.querySelectorAll('button').forEach(control => { control.disabled = false; }); }
   });
 }
 
@@ -1110,16 +1423,16 @@ const rescanLinkBtn = document.getElementById('rescanLinkBtn');
 if (rescanLinkBtn) {
   rescanLinkBtn.addEventListener('click', async () => {
     rescanLinkBtn.disabled = true;
-    rescanLinkBtn.textContent = 'Scanning...';
+    rescanLinkBtn.textContent = 'Scanning…';
     try {
       const res = await apiRequest('/api/admin/link-queue/scan', { method: 'POST' });
-      notifyCrew(`✓ Scan complete! Found ${res.generated || 0} candidate link(s) for verification.`);
+      notifyCrew(`Scan done — ${plural(res.generated || 0, 'link')}.`, 'success');
       loadLinkQueue();
     } catch (err) {
-      notifyCrew(err.message);
+      notifyCrew(err.message, 'error');
     } finally {
       rescanLinkBtn.disabled = false;
-      rescanLinkBtn.textContent = '🔍 Scan Burst & Appearance Links';
+      rescanLinkBtn.textContent = 'Find links';
     }
   });
 }
@@ -1133,25 +1446,98 @@ function showRetrainStatus(trainedOn) {
   const el = document.getElementById('retrainStatus');
   if (!el) return;
   el.hidden = !trainedOn;
-  el.textContent = trainedOn ? `Fallback-match scoring trained on ${trainedOn} review${trainedOn === 1 ? '' : 's'}` : '';
+  el.textContent = trainedOn ? `Scoring trained on ${plural(trainedOn, 'review')}` : '';
 }
 const retrainBtn = document.getElementById('retrainBtn');
 if (retrainBtn) {
   retrainBtn.addEventListener('click', async () => {
     retrainBtn.disabled = true;
-    retrainBtn.textContent = 'Retraining...';
+    retrainBtn.textContent = 'Retraining…';
     try {
       const res = await apiRequest('/api/admin/retrain', { method: 'POST' });
-      if (res.trained) { notifyCrew(`✓ Fallback-match scoring retrained on ${res.reviewCount} reviews.`); showRetrainStatus(res.reviewCount); }
-      else notifyCrew(`Not enough reviewed pairs yet (${res.reviewCount} so far) — keep reviewing the queues above, then retrain again.`);
+      if (res.trained) { notifyCrew(`Retrained on ${plural(res.reviewCount, 'review')}.`, 'success'); showRetrainStatus(res.reviewCount); }
+      else if (res.reviewCount < 20) notifyCrew(`Only ${res.reviewCount} reviewed so far — needs 20. Keep going.`);
+      else notifyCrew(`${res.reviewCount} reviewed, but all one answer — needs some of each.`);   // the Worker won't fit on confirms-only or rejects-only
     } catch (err) {
-      notifyCrew(err.message);
+      notifyCrew(err.message, 'error');
     } finally {
       retrainBtn.disabled = false;
-      retrainBtn.textContent = '🧠 Retrain from Reviews';
+      retrainBtn.textContent = 'Retrain scoring';
     }
   });
 }
+
+// ── Session hygiene: idle sign-out, API health pill, tab title ────────────────
+
+// The token lives in sessionStorage with no expiry of its own: drop it after 30 min without input,
+// with a 2-minute warning. Never mid-upload — re-arm instead, so a long batch can't sign itself out.
+const IDLE_MS = 30 * 60 * 1000, IDLE_WARN_MS = 2 * 60 * 1000;
+let idleTimer = null, idleWarnTimer = null, idleWarning = null, idleTouchedAt = 0;
+function armIdle() {
+  disarmIdle();
+  if (!isAuthenticated()) return;
+  idleWarnTimer = setTimeout(() => { if (!uploadBusy) idleWarning = toast('Signing you out in 2 min — tap anything to stay.', 'info', { timeout: IDLE_WARN_MS }); }, IDLE_MS - IDLE_WARN_MS);
+  idleTimer = setTimeout(() => {
+    if (uploadBusy) return armIdle();
+    clearToken(); showLogin(); notifyCrew("Signed out — you'd gone quiet for 30 min.");
+  }, IDLE_MS);
+}
+function disarmIdle() { clearTimeout(idleTimer); clearTimeout(idleWarnTimer); idleTimer = idleWarnTimer = null; idleWarning?.remove(); idleWarning = null; }
+function touchIdle() {
+  if (!idleTimer) return;                                                       // not armed (login screen)
+  const now = Date.now(); if (now - idleTouchedAt < 1000) return; idleTouchedAt = now;   // scroll fires constantly
+  armIdle();
+}
+['pointerdown', 'keydown', 'scroll'].forEach(type => document.addEventListener(type, touchIdle, { passive: true, capture: true }));
+
+// Topbar health pill: GET /api/health (public, no auth) every 60 s while signed in and the tab is
+// visible. One dot per check; the pill's data-state is the worst of them. Must never throw.
+const HEALTH_MS = 60000;
+const HEALTH_CHECKS = [['api', 'API'], ['db', 'DB'], ['r2', 'R2'], ['face', 'Face']];
+let healthTimer = null;
+const HEALTH_DOT = { ok: 'var(--success)', skipped: 'var(--soi-umber-soft)', error: 'var(--soi-terracotta)' };
+function renderHealth(el, state, checks) {
+  const dot = key => ['ok', 'error', 'skipped'].includes(checks[key]) ? checks[key] : 'error';
+  el.classList.add('health-pill'); el.dataset.state = state;
+  el.innerHTML = HEALTH_CHECKS.map(([key, label]) => `<span class="health-check" data-state="${dot(key)}"><i aria-hidden="true" style="color:${HEALTH_DOT[dot(key)]}">●</i> ${label}</span>`).join(' · ');
+  el.title = HEALTH_CHECKS.map(([key, label]) => `${label}: ${dot(key)}`).join(' · ');
+  el.setAttribute('aria-label', `Service health ${state}: ${el.title}`);
+  el.hidden = false; el.classList.remove('hidden');
+}
+async function pollHealth() {
+  try {
+    const el = document.getElementById('apiHealth');
+    if (!el || !isAuthenticated() || document.hidden) return;
+    let state = 'down', checks = {};
+    try {
+      const resp = await fetch(apiUrl('/api/health'), { signal: AbortSignal.timeout(5000) });
+      if (resp.status === 404) { el.hidden = true; return; }              // Worker without the route yet
+      const body = await resp.json().catch(() => ({}));
+      checks = { api: 'ok', ...(body.checks || {}) };
+      state = resp.ok && body.ok === true ? 'ok' : 'degraded';
+    } catch { checks = {}; }
+    renderHealth(el, state, checks);
+  } catch { /* the pill must never break the studio */ }
+}
+function startHealth() {
+  clearInterval(healthTimer); healthTimer = null;
+  if (!isLive || !isAuthenticated() || document.hidden) return;
+  pollHealth(); healthTimer = setInterval(pollHealth, HEALTH_MS);
+}
+function stopHealth({ hide = false } = {}) {
+  clearInterval(healthTimer); healthTimer = null;
+  const el = document.getElementById('apiHealth');
+  if (hide && el) { el.hidden = true; el.classList.add('hidden'); }
+}
+
+// A batch that finishes while the crew is in another tab flags the title until they come back.
+const baseTitle = document.title;
+function flagFinishedInTitle(label) { if (document.hidden) document.title = label; }
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { stopHealth(); return; }
+  document.title = baseTitle;
+  startHealth();
+});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

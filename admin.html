@@ -3,799 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Surfers of India — Admin</title>
+    <title>Surfers of India — Crew</title>
     <link rel="icon" type="image/svg+xml" href="assets/soi-logo.svg" />
     <meta name="robots" content="noindex, nofollow" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Modak&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,500&family=Caveat:wght@600;700&display=swap" rel="stylesheet" />
-    <style>
-      :root {
-        --ink: #2b2018;
-        --cream: #f2ecdb;
-        --sand: #e7dcc2;
-        --coral: #b5502f;
-        --ocean: #264a6b;
-        --sage: #9fc4bc;
-        --marker: #e8a23c;
-        --mono: 'Plus Jakarta Sans', monospace;
-        --sans: 'Plus Jakarta Sans', sans-serif;
-        --serif: 'Plus Jakarta Sans', sans-serif;
-        --bg: #1a1510;
-        --surface: #252015;
-        --border: rgba(255,255,255,0.09);
-        --text: #f0ead8;
-        --muted: #a09880;
-      }
-      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-      html { height: 100%; }
-      body {
-        min-height: 100%;
-        background: var(--bg);
-        color: var(--text);
-        font-family: var(--sans);
-        display: flex;
-        flex-direction: column;
-      }
-      button, input, select, textarea { font: inherit; }
-      button { cursor: pointer; border: 0; }
-      .hidden { display: none !important; }
-
-      /* ── Top bar ── */
-      .topbar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 18px 32px;
-        border-bottom: 1px solid var(--border);
-        background: var(--surface);
-        position: sticky;
-        top: 0;
-        z-index: 10;
-      }
-      .topbar-brand {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        font-size: 15px;
-        font-weight: 700;
-        letter-spacing: -.6px;
-        color: var(--text);
-        text-decoration: none;
-        transition: opacity .2s ease, transform .2s ease;
-      }
-      .topbar-brand:hover { opacity: 0.9; transform: translateY(-1px); }
-      .topbar-brand img { height: 36px; width: 36px; object-fit: contain; }
-      .topbar-brand small {
-        display: block;
-        font: 9px var(--mono);
-        text-transform: uppercase;
-        letter-spacing: 2px;
-        color: var(--marker);
-        margin-top: 2px;
-      }
-      .topbar-right { display: flex; align-items: center; gap: 16px; }
-      .back-link {
-        font: 10px var(--mono);
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        color: var(--muted);
-        text-decoration: none;
-        padding: 6px 12px;
-        border-radius: 4px;
-        transition: color .2s ease, background .2s ease;
-      }
-      .back-link:hover { color: var(--text); background: rgba(255, 255, 255, 0.05); }
-      .sign-out-btn {
-        background: none;
-        color: var(--muted);
-        font: 10px var(--mono);
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        padding: 6px 14px;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        cursor: pointer;
-        transition: color .2s ease, border-color .2s ease, background .2s ease, transform .15s ease;
-      }
-      .sign-out-btn:hover { color: var(--coral); border-color: var(--coral); background: rgba(208, 96, 80, 0.1); transform: translateY(-1px); }
-      .sign-out-btn:active { transform: translateY(0); }
-
-      /* ── Layout ── */
-      .admin-body {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        max-width: 860px;
-        margin: 0 auto;
-        padding: 40px 32px 80px;
-        width: 100%;
-      }
-
-      /* ── Login ── */
-      .login-screen {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        padding: 40px 0;
-        gap: 0;
-      }
-      .login-card {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        padding: 48px 40px;
-        width: 100%;
-        max-width: 400px;
-      }
-      .login-card .eyebrow {
-        font: 10px var(--mono);
-        letter-spacing: 2px;
-        color: var(--marker);
-        margin-bottom: 10px;
-        display: block;
-      }
-      .login-card h2 {
-        font: 600 32px/1 var(--serif);
-        letter-spacing: -1.5px;
-        margin-bottom: 28px;
-      }
-      .login-card label {
-        display: block;
-        font: 10px var(--mono);
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        color: var(--muted);
-        margin-bottom: 6px;
-      }
-      .login-card input[type="password"] {
-        width: 100%;
-        background: rgba(255,255,255,.06);
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        padding: 12px 14px;
-        color: var(--text);
-        font-size: 16px;
-        margin-bottom: 20px;
-        transition: border-color .2s;
-      }
-      .login-card input[type="password"]:focus {
-        outline: none;
-        border-color: var(--marker);
-      }
-      .login-error {
-        font: 11px var(--mono);
-        color: var(--coral);
-        margin-top: -12px;
-        margin-bottom: 16px;
-        min-height: 16px;
-      }
-
-      /* ── Tabs ── */
-      .tabs {
-        display: flex;
-        gap: 0;
-        border-bottom: 1px solid var(--border);
-        margin-bottom: 36px;
-      }
-      .tab-btn {
-        background: none;
-        color: var(--muted);
-        font: 11px var(--mono);
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        padding: 14px 22px;
-        border-bottom: 2px solid transparent;
-        margin-bottom: -1px;
-        transition: color .2s, border-color .2s;
-      }
-      .tab-btn:hover { color: var(--text); }
-      .tab-btn.active {
-        color: var(--marker);
-        border-bottom-color: var(--marker);
-      }
-      .tab-panel { display: none; }
-      .tab-panel.active { display: block; }
-
-      /* ── Section titles ── */
-      .section-title {
-        font: 600 26px/1 var(--serif);
-        letter-spacing: -1px;
-        margin-bottom: 6px;
-      }
-      .section-sub {
-        font-size: 13px;
-        color: var(--muted);
-        margin-bottom: 28px;
-      }
-
-      /* ── Form fields ── */
-      .field-group {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 14px;
-        margin-bottom: 20px;
-      }
-      @media (max-width: 600px) { .field-group { grid-template-columns: 1fr; } }
-      .field { display: flex; flex-direction: column; gap: 6px; }
-      .field label {
-        font: 10px var(--mono);
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        color: var(--muted);
-      }
-      .field input {
-        background: rgba(255,255,255,.06);
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        padding: 10px 12px;
-        color: var(--text);
-        font-size: 14px;
-        transition: border-color .2s;
-      }
-      .field input:focus { outline: none; border-color: var(--marker); }
-
-      /* ── Drop zone ── */
-      .drop-zone {
-        border: 2px dashed var(--border);
-        border-radius: 10px;
-        padding: 40px 24px;
-        text-align: center;
-        cursor: pointer;
-        transition: border-color .2s, background .2s;
-        margin-bottom: 20px;
-        position: relative;
-      }
-      .drop-zone:hover, .drop-zone.dragging {
-        border-color: var(--marker);
-        background: rgba(248,232,56,.04);
-      }
-      .drop-zone .drop-icon {
-        font-size: 40px;
-        margin-bottom: 12px;
-        display: block;
-        opacity: .5;
-      }
-      .drop-zone h3 {
-        font: 600 18px var(--serif);
-        margin-bottom: 6px;
-      }
-      .drop-zone p {
-        font-size: 13px;
-        color: var(--muted);
-        margin-bottom: 18px;
-      }
-      .choose-btn {
-        display: inline-block;
-        background: var(--marker);
-        color: var(--ink);
-        font-weight: 700;
-        font-size: 13px;
-        padding: 12px 24px;
-        border-radius: 50px;
-        cursor: pointer;
-        border: none;
-        transition: transform .25s cubic-bezier(.34,1.56,.64,1), box-shadow .25s ease, background .25s ease;
-      }
-      .choose-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(248,232,56,.25); background: #ffffff; }
-      .choose-btn:active { transform: translateY(0); }
-
-      /* ── Progress ── */
-      .progress-wrap { margin-bottom: 16px; }
-      .progress-bar-track {
-        height: 6px;
-        background: rgba(255,255,255,.08);
-        border-radius: 3px;
-        overflow: hidden;
-        margin-bottom: 8px;
-      }
-      .progress-bar-fill {
-        height: 100%;
-        background: linear-gradient(90deg, var(--ocean), var(--marker));
-        border-radius: 3px;
-        width: 0%;
-        transition: width .3s ease;
-      }
-      .progress-meta {
-        display: flex;
-        justify-content: space-between;
-        font: 10px var(--mono);
-        color: var(--muted);
-      }
-
-      /* ── Upload status ── */
-      .upload-status {
-        font: 12px var(--mono);
-        padding: 10px 14px;
-        border-radius: 6px;
-        background: rgba(255,255,255,.05);
-        border: 1px solid var(--border);
-        margin-bottom: 20px;
-        display: none;
-      }
-      .upload-status.visible { display: block; }
-      .upload-status.error { color: var(--coral); border-color: rgba(208,96,80,.3); }
-
-      /* ── Live per-photo upload list ── */
-      .photo-list { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow: auto; }
-      .photo-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); font-size: 11px; transition: opacity .25s ease; }
-      .photo-row:first-child { border-top: 0; }
-      .photo-row[data-state="skipped"] { opacity: .5; }
-      .photo-row-thumb { position: relative; flex: none; width: 46px; height: 46px; border-radius: 6px; overflow: hidden; background: #ede4d0; }
-      .photo-row-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
-      .photo-row-status { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font: 700 13px/1 var(--sans); font-style: normal; background: rgba(43,32,24,.45); opacity: 0; transition: opacity .2s ease, background .2s ease; }
-      .photo-row:not([data-state="waiting"]) .photo-row-status { opacity: 1; }
-      .photo-row[data-state="uploading"] .photo-row-status::after { content: ''; width: 18px; height: 18px; border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; border-radius: 50%; animation: review-spin .8s linear infinite; }
-      /* Finished states keep the photo visible and mark it with a corner badge. */
-      .photo-row[data-state="done"] .photo-row-status, .photo-row[data-state="failed"] .photo-row-status, .photo-row[data-state="skipped"] .photo-row-status { background: transparent; place-items: end; }
-      .photo-row[data-state="done"] .photo-row-status::after, .photo-row[data-state="failed"] .photo-row-status::after, .photo-row[data-state="skipped"] .photo-row-status::after { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; margin: 0 3px 3px 0; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
-      .photo-row[data-state="done"] .photo-row-status::after { content: '✓'; background: #32634e; }
-      .photo-row[data-state="failed"] .photo-row-status::after { content: '✕'; background: #a3372b; }
-      .photo-row[data-state="skipped"] .photo-row-status::after { content: '–'; background: #6d6052; }
-      .photo-row-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-      .photo-row-name small { display: block; color: var(--muted); margin-top: 3px; }
-      .photo-row-tag { flex: none; font: 9px var(--mono); font-style: normal; letter-spacing: .5px; text-transform: uppercase; padding: 4px 8px; border-radius: 12px; background: #f6f0dc; color: #786023; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .photo-row-tag:empty { display: none; }
-      .photo-row-tag[data-kind="ok"] { background: #e8f0ec; color: #32634e; }
-      .photo-row-tag[data-kind="error"] { background: #faeeeb; color: #a3372b; }
-      .file-queue[data-uploading] .photo-row button, .file-queue[data-finished] .photo-row button { display: none; }
-      @media (prefers-reduced-motion: reduce) { .photo-row[data-state="uploading"] .photo-row-status::after { animation: none; border-color: #fff; } }
-
-      /* ── Upload more: duplicate handling ── */
-      .more-summary { font-size: 13px; line-height: 1.7; margin-bottom: 16px; }
-      .more-summary strong { color: var(--ocean); }
-      .more-photos { border: 1px solid var(--border); border-radius: 9px; padding: 14px 16px; margin-bottom: 18px; background: #fff; }
-      .more-photos h4 { font: 600 12px var(--sans); margin-bottom: 6px; }
-      .more-choice { border: 0; padding: 0; margin: 0 0 18px; display: grid; gap: 10px; }
-      .more-choice[hidden] { display: none; }
-      .more-choice legend { font: 600 12px var(--sans); margin-bottom: 10px; }
-      .more-choice label { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--border); border-radius: 9px; background: #fff; cursor: pointer; transition: border-color .2s ease, background .2s ease; }
-      .more-choice label:hover, .more-choice label:has(input:checked) { border-color: var(--ocean); background: #e8f0f5; }
-      .more-choice input { margin-top: 3px; accent-color: var(--ocean); }
-      .more-choice strong { display: block; font-size: 13px; margin-bottom: 3px; }
-      .more-choice small { font-size: 11px; line-height: 1.6; color: var(--muted); }
-      .more-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
-      .more-cancel { background: transparent; border: 1px solid var(--border); border-radius: 30px; padding: 14px 22px; font: 600 12px var(--sans); color: var(--text); cursor: pointer; }
-      .more-cancel:hover { background: #ede4d0; }
-      .more-retry { background: transparent; border: 1px solid #b5502f55; border-radius: 30px; padding: 14px 22px; font: 600 12px var(--sans); color: #a3372b; cursor: pointer; }
-      .more-retry:hover { background: #faeeeb; }
-      .more-retry[hidden] { display: none; }
-
-      /* ── Publish button ── */
-      .publish-btn {
-        background: var(--coral);
-        color: #fff;
-        font-weight: 700;
-        font-size: 15px;
-        padding: 15px 28px;
-        border-radius: 50px;
-        border: none;
-        cursor: pointer;
-        transition: transform .25s cubic-bezier(.34,1.56,.64,1), box-shadow .25s ease, background .25s ease;
-        display: inline-block;
-        margin-top: 8px;
-      }
-      .publish-btn:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 10px 24px rgba(208,96,80,.35);
-        background: #e06858;
-      }
-      .publish-btn.published-state {
-        background: #4caf50 !important;
-        color: #fff !important;
-        box-shadow: 0 8px 20px rgba(76,175,80,.3) !important;
-      }
-      .publish-btn:active { transform: translateY(-1px); }
-      .publish-btn:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
-      .publish-btn span { font-size: 20px; margin-left: 14px; display: inline-block; transition: transform .2s ease; }
-      .publish-btn:hover span { transform: translateX(4px); }
-
-      /* ── Dashboard cards ── */
-      .dashboard-grid {
-        display: grid;
-        gap: 14px;
-      }
-      .d-card {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 20px 24px;
-        transition: border-color .2s ease, transform .2s ease;
-      }
-      .d-card:hover { border-color: rgba(255,255,255,0.18); transform: translateY(-1px); }
-      .d-card-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 14px;
-      }
-      .d-card-title { font: 600 16px var(--serif); }
-      .d-card-status {
-        font: 10px var(--mono);
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        padding: 3px 10px;
-        border-radius: 20px;
-        background: rgba(255,255,255,.07);
-        color: var(--muted);
-      }
-      .d-card-status.published { background: rgba(160,184,176,.15); color: var(--sage); }
-      .d-card-status.draft { background: rgba(248,232,56,.12); color: var(--marker); }
-      .d-card-status.archived { background: rgba(255,255,255,.05); color: var(--muted); }
-      .d-card-stats {
-        display: flex;
-        gap: 24px;
-        align-items: center;
-      }
-      .d-card-stats > div { display: flex; flex-direction: column; gap: 2px; }
-      .d-card-stats span { font: 9px var(--mono); text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
-      .d-card-stats strong { font-size: 18px; font-weight: 700; }
-      .d-card-stats .spacer { flex: 1; }
-      .delete-btn {
-        background: rgba(208,96,80,.12);
-        color: var(--coral);
-        border: 1px solid rgba(208,96,80,.25);
-        font: 10px var(--mono);
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        padding: 7px 14px;
-        border-radius: 6px;
-        cursor: pointer;
-        transition: background .2s ease, border-color .2s ease, color .2s ease, transform .15s ease;
-      }
-      .delete-btn:hover {
-        background: rgba(208,96,80,.28);
-        border-color: var(--coral);
-        transform: translateY(-1px);
-      }
-      .delete-btn:active { transform: translateY(0); }
-      .refresh-link {
-        background: none;
-        color: var(--muted);
-        font: 10px var(--mono);
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        padding: 4px 8px;
-        border-radius: 4px;
-        text-decoration: underline;
-        transition: color .2s ease, background .2s ease;
-        cursor: pointer;
-        border: none;
-      }
-      .refresh-link:hover { color: var(--text); background: rgba(255,255,255,0.05); }
-      .dashboard-header {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        margin-bottom: 20px;
-      }
-      .loading-msg, .empty-msg {
-        color: var(--muted);
-        font: 12px var(--mono);
-        text-align: center;
-        padding: 40px 0;
-      }
-      .error-msg { color: var(--coral); }
-
-      /* ── Live Indexing Status Badges & Progress ── */
-      .indexing-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        font: 9px var(--mono);
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        padding: 3px 9px;
-        border-radius: 20px;
-        font-weight: 700;
-      }
-      .indexing-badge.done {
-        background: rgba(76,175,80,0.15);
-        color: #4caf50;
-        border: 1px solid rgba(76,175,80,0.3);
-      }
-      .indexing-badge.processing {
-        background: rgba(248,232,56,0.15);
-        color: var(--marker);
-        border: 1px solid rgba(248,232,56,0.35);
-      }
-      .indexing-badge.warning {
-        background: rgba(208,96,80,0.15);
-        color: var(--coral);
-        border: 1px solid rgba(208,96,80,0.35);
-      }
-      .indexing-badge.empty {
-        background: rgba(255,255,255,0.06);
-        color: var(--muted);
-        border: 1px solid var(--border);
-      }
-      .pulse-dot {
-        width: 7px;
-        height: 7px;
-        border-radius: 50%;
-        background: var(--marker);
-        box-shadow: 0 0 0 rgba(248,232,56,0.7);
-        animation: pulseAnimation 1.5s infinite;
-      }
-      @keyframes pulseAnimation {
-        0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(248,232,56,0.7); }
-        70% { transform: scale(1.15); box-shadow: 0 0 0 5px rgba(248,232,56,0); }
-        100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(248,232,56,0); }
-      }
-      .card-progress-track {
-        height: 5px;
-        background: rgba(255,255,255,0.08);
-        border-radius: 3px;
-        overflow: hidden;
-        margin-top: 14px;
-        margin-bottom: 2px;
-      }
-      .card-progress-fill {
-        height: 100%;
-        background: linear-gradient(90deg, var(--ocean), var(--marker));
-        border-radius: 3px;
-        transition: width 0.4s ease;
-      }
-
-      /* ── Dashboard Metrics ── */
-      .metrics-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-        gap: 14px;
-        margin-bottom: 28px;
-      }
-      .metric-card {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 16px 20px;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-      .metric-card label {
-        font: 9px var(--mono);
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        color: var(--muted);
-      }
-      .metric-card .value {
-        font-size: 24px;
-        font-weight: 700;
-        color: var(--text);
-      }
-
-      /* ── Action Buttons ── */
-      .action-group {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-        align-items: center;
-        margin-top: 12px;
-      }
-      .btn-sm {
-        font: 10px var(--mono);
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        padding: 6px 12px;
-        border-radius: 6px;
-        cursor: pointer;
-        border: 1px solid var(--border);
-        background: rgba(255,255,255,0.06);
-        color: var(--text);
-        transition: all .2s ease;
-      }
-      .btn-sm:hover {
-        background: rgba(255,255,255,0.14);
-        transform: translateY(-1px);
-      }
-      .btn-primary-sm {
-        background: rgba(248,232,56,0.12);
-        color: var(--marker);
-        border-color: rgba(248,232,56,0.3);
-      }
-      .btn-primary-sm:hover {
-        background: rgba(248,232,56,0.25);
-        border-color: var(--marker);
-      }
-
-      /* ── Modals ── */
-      .modal-overlay {
-        position: fixed;
-        top: 0; left: 0; right: 0; bottom: 0;
-        background: rgba(0,0,0,0.85);
-        backdrop-filter: blur(8px);
-        z-index: 100;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 20px;
-      }
-      .modal-card {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 14px;
-        max-width: 900px;
-        width: 100%;
-        max-height: 85vh;
-        display: flex;
-        flex-direction: column;
-        box-shadow: 0 20px 50px rgba(0,0,0,0.6);
-        overflow: hidden;
-      }
-      .modal-header {
-        padding: 20px 24px;
-        border-bottom: 1px solid var(--border);
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-      }
-      .modal-header h3 { font: 600 20px var(--serif); }
-      .modal-close {
-        background: none;
-        border: none;
-        color: var(--muted);
-        font-size: 24px;
-        cursor: pointer;
-        padding: 4px 8px;
-        border-radius: 6px;
-        transition: color .2s ease;
-      }
-      .modal-close:hover { color: var(--text); }
-      .modal-body {
-        padding: 24px;
-        overflow-y: auto;
-        flex: 1;
-      }
-
-      /* ── Photo Gallery Grid ── */
-      .admin-photo-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-        gap: 14px;
-      }
-      .photo-card {
-        position: relative;
-        background: #111;
-        border-radius: 8px;
-        overflow: hidden;
-        border: 1px solid var(--border);
-        aspect-ratio: 1;
-      }
-      .photo-card img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        display: block;
-      }
-      .photo-card .photo-badge {
-        position: absolute;
-        top: 6px;
-        left: 6px;
-        background: rgba(0,0,0,0.8);
-        backdrop-filter: blur(4px);
-        font: 9px var(--mono);
-        padding: 3px 6px;
-        border-radius: 4px;
-        color: var(--marker);
-      }
-      .photo-card .photo-delete-btn {
-        position: absolute;
-        bottom: 6px;
-        right: 6px;
-        background: rgba(208,96,80,0.9);
-        color: white;
-        border: none;
-        border-radius: 4px;
-        font: 9px var(--mono);
-        padding: 4px 8px;
-        cursor: pointer;
-        opacity: 0;
-        transition: opacity .2s ease;
-      }
-      .photo-card:hover .photo-delete-btn { opacity: 1; }
-
-      /* ── Verification Queue Styles ── */
-      .verify-grid {
-        display: grid;
-        gap: 20px;
-      }
-      .verify-card {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 14px;
-        padding: 24px;
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
-        transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-      }
-      .verify-faces {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 24px;
-      }
-      .verify-face-wrapper {
-        width: 170px;
-        height: 170px;
-        border-radius: 12px;
-        overflow: hidden;
-        border: 2px solid rgba(248,232,56,0.35);
-        position: relative;
-        background: #000;
-        box-shadow: 0 6px 16px rgba(0,0,0,0.5);
-      }
-      .verify-face-img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        object-position: center 25%;
-        transform: scale(1.85);
-        transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-        cursor: zoom-out;
-      }
-      .verify-face-wrapper:hover .verify-face-img {
-        transform: scale(1.0);
-      }
-      .verify-zoom-tip {
-        position: absolute;
-        bottom: 6px;
-        left: 50%;
-        transform: translateX(-50%);
-        font: 8px var(--mono);
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        background: rgba(0,0,0,0.85);
-        color: var(--marker);
-        padding: 3px 8px;
-        border-radius: 4px;
-        pointer-events: none;
-        white-space: nowrap;
-        border: 1px solid rgba(248,232,56,0.2);
-      }
-      .verify-vs {
-        font: 700 16px var(--mono);
-        color: var(--marker);
-        background: rgba(248,232,56,0.1);
-        padding: 10px 14px;
-        border-radius: 50%;
-        border: 1px solid rgba(248,232,56,0.25);
-      }
-      .verify-actions {
-        display: flex;
-        gap: 14px;
-        justify-content: center;
-      }
-      .confirm-btn {
-        background: #2e7d32;
-        color: white;
-        border: none;
-        padding: 10px 22px;
-        border-radius: 8px;
-        font: 11px var(--mono);
-        font-weight: 700;
-        cursor: pointer;
-        transition: all .2s ease;
-      }
-      .confirm-btn:hover { background: #388e3c; transform: translateY(-1px); }
-      .reject-btn {
-        background: rgba(208,96,80,0.18);
-        color: var(--coral);
-        border: 1px solid rgba(208,96,80,0.4);
-        padding: 10px 22px;
-        border-radius: 8px;
-        font: 11px var(--mono);
-        font-weight: 700;
-        cursor: pointer;
-        transition: all .2s ease;
-      }
-      .reject-btn:hover { background: rgba(208,96,80,0.35); transform: translateY(-1px); }
-    </style>
-  <link rel="stylesheet" href="admin-theme.css" />
-<link rel="stylesheet" href="soi-brand.css">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,500&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&display=swap" rel="stylesheet" />
+    <meta name="theme-color" content="#F2ECDB" />
+    <link rel="stylesheet" href="soi-tokens.css" />
+    <link rel="stylesheet" href="admin-theme.css" />
   </head>
   <body>
     <header class="topbar">
@@ -804,22 +21,25 @@
         <span>Surfers of India <small>CREW STUDIO</small></span>
       </a>
       <div class="topbar-right">
-        <a class="back-link" href="/">← Back to site</a>
+        <span class="health-pill" id="apiHealth" hidden aria-live="polite"></span>
+        <a class="back-link" href="/">← Site</a>
         <button class="sign-out-btn hidden" id="signOutBtn">Sign out</button>
       </div>
     </header>
 
     <!-- ── Login screen ── -->
     <div class="admin-body" id="loginScreen">
-      <div class="login-screen"><aside class="login-story"><img src="assets/soi-waves.svg" alt=""><div><span class="eyebrow">SURFERS OF INDIA / PHOTO STUDIO</span><h1>Waves,<br>told loud.</h1><p>The Indian coast, through your lens.</p></div></aside>
+      <div class="login-screen"><aside class="login-story"><img src="assets/brand-surf-portrait.webp" alt="" width="600" height="750" decoding="async"><svg class="stamp-corner" aria-hidden="true"><use href="soi-stamps.svg#stamp-hibiscus"/></svg><div><span class="eyebrow">SURFERS OF INDIA</span><h1>Waves,<br>told loud.</h1><p>The Indian coast, through your lens.</p></div></aside>
         <div class="login-card">
-          <span class="eyebrow">BACKSTAGE ACCESS</span>
-          <h2>Your next session starts here.</h2><p class="login-intro">Sign in to upload a session, organise photos and review matches.</p>
+          <span class="eyebrow">CREW ONLY</span>
+          <h2>Morning, crew.</h2><p class="login-intro">Sign in to drop today’s session.</p>
           <form id="loginForm">
-            <label for="adminPassword">Crew password</label>
-            <div class="password-field"><input id="adminPassword" type="password" autocomplete="current-password" placeholder="Enter your crew password" required /><button id="togglePassword" class="password-toggle" type="button" aria-controls="adminPassword" aria-pressed="false">Show</button></div>
+            <label class="visually-hidden" for="adminUsername">Username</label>
+            <input class="visually-hidden" id="adminUsername" type="text" name="username" value="crew" autocomplete="username" readonly tabindex="-1" aria-hidden="true" />
+            <label for="adminPassword">Password</label>
+            <div class="password-field"><input id="adminPassword" type="password" autocomplete="current-password" placeholder="Password" required /><button id="togglePassword" class="password-toggle" type="button" aria-controls="adminPassword" aria-pressed="false">Show</button></div>
             <div class="login-error" id="loginError" role="alert"></div>
-            <button class="publish-btn" type="submit" style="width:100%;">Enter studio <span>→</span></button>
+            <button class="publish-btn" type="submit">Let’s go</button>
           </form>
         </div>
       </div>
@@ -827,43 +47,43 @@
 
     <!-- ── Admin workspace ── -->
     <div class="admin-body hidden" id="adminApp">
-      <div class="studio-heading"><div><span class="eyebrow">SURFERS OF INDIA / CREW STUDIO</span><h1>The coast. Captured.</h1></div><span class="studio-badge">Surfers of India · Photo studio</span></div><p id="adminNotice" class="admin-notice" role="status" hidden></p><nav class="tabs" role="tablist" aria-label="Crew workspace">
-        <button class="tab-btn active" id="nav-upload" role="tab" aria-controls="tab-upload" aria-selected="true" tabindex="0" data-tab="upload">01 &nbsp; Upload photos</button>
-        <button class="tab-btn" id="nav-dashboard" role="tab" aria-controls="tab-dashboard" aria-selected="false" tabindex="-1" data-tab="dashboard">02 &nbsp; Sessions</button>
-        <button class="tab-btn" id="nav-verify" role="tab" aria-controls="tab-verify" aria-selected="false" tabindex="-1" data-tab="verify">03 &nbsp; Review matches</button>
+      <div class="studio-heading"><div><span class="eyebrow">CREW STUDIO</span><h1>Drop the session.</h1></div></div><p id="adminNotice" class="admin-notice" role="status" hidden></p><nav class="tabs" role="tablist" aria-label="Crew workspace">
+        <button class="tab-btn active" id="nav-upload" role="tab" aria-controls="tab-upload" aria-selected="true" tabindex="0" data-tab="upload">Upload</button>
+        <button class="tab-btn" id="nav-dashboard" role="tab" aria-controls="tab-dashboard" aria-selected="false" tabindex="-1" data-tab="dashboard">Sessions</button>
+        <button class="tab-btn" id="nav-verify" role="tab" aria-controls="tab-verify" aria-selected="false" tabindex="-1" data-tab="verify">Review</button>
       </nav>
 
       <!-- Upload tab -->
       <div class="tab-panel active" id="tab-upload" role="tabpanel" aria-labelledby="nav-upload">
-        <h2 class="section-title">A fresh set of memories.</h2>
-        <p class="section-sub">Fill in the session details, drop all the photos, then publish.</p>
+        <h2 class="section-title">New session.</h2>
+        <p class="section-sub">Name it, drop the photos, publish.</p>
 
         <form id="uploadForm">
           <div class="field-group">
             <div class="field">
-              <label for="adminTitle">Session name</label>
+              <label for="adminTitle">Session</label>
               <input id="adminTitle" type="text" value="Morning surf" maxlength="80" required placeholder="e.g. Morning glass" />
             </div>
             <div class="field">
-              <label for="adminDate">Session date</label>
+              <label for="adminDate">Date</label>
               <input id="adminDate" type="date" required />
             </div>
             <div class="field">
-              <label for="adminLocation">Beach / break</label>
+              <label for="adminLocation">Break</label>
               <input id="adminLocation" type="text" value="Mulki Beach" maxlength="80" required placeholder="e.g. Mulki Beach" />
             </div>
             <div class="field">
-              <label for="adminPrice">Photo-pack price (₹) · standard ₹700</label>
+              <label for="adminPrice">Pack price (₹)</label>
               <input id="adminPrice" type="number" value="700" min="1" step="1" required />
             </div>
           </div>
 
           <div class="drop-zone" id="adminDropZone">
             <span class="drop-icon">⬆</span>
-            <h3>Drop today's session here</h3>
-            <p>Photos are uploaded instantly and indexed in the background.<br />Guests can browse watermarked previews. Payments and downloads are on hold.</p>
-            <button class="choose-btn" id="choosePhotos" type="button">Choose photos ↑</button>
-            <input id="adminPhotoInput" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden />
+            <h3>Drop today’s photos</h3>
+            <p>JPG, PNG, WebP or HEIC. No RAW — export JPGs first.</p>
+            <button class="choose-btn" id="choosePhotos" type="button">Pick photos</button>
+            <input id="adminPhotoInput" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" multiple hidden />
           </div>
 
           <div class="file-queue" id="fileQueue" hidden></div><div class="upload-status" id="uploadStatus" role="status"></div>
@@ -875,10 +95,11 @@
             <div class="progress-meta">
               <span id="progressSpeed">0 KB/s</span>
               <span id="progressEta">ETA: --</span>
+              <button type="button" class="btn-sm" id="cancelUploadBtn">Stop</button>
             </div>
           </div>
 
-          <button class="publish-btn" type="submit" id="publishBtn">Publish photo pack <span>→</span></button>
+          <button class="publish-btn" type="submit" id="publishBtn" disabled>Publish</button>
         </form>
       </div>
 
@@ -886,34 +107,33 @@
       <div class="tab-panel" id="tab-dashboard" role="tabpanel" aria-labelledby="nav-dashboard">
         <div class="dashboard-header">
           <div>
-            <h2 class="section-title">Your sessions.</h2>
-            <p class="section-sub">See what’s published, what’s processing and what needs attention.</p>
+            <h2 class="section-title">Sessions.</h2>
           </div>
-          <button class="refresh-link" id="refreshBtn">↻ Refresh</button>
+          <button class="refresh-link" id="refreshBtn">Refresh</button>
         </div>
 
         <!-- Metrics summary cards -->
         <div class="metrics-grid">
           <div class="metric-card">
-            <label>Ready photos</label>
+            <label>Indexed</label>
             <div class="value" id="statIndexed">0</div>
           </div>
           <div class="metric-card">
-            <label>Need attention</label>
+            <label>Need a look</label>
             <div class="value" id="statFailed">0</div>
           </div>
           <div class="metric-card">
-            <label>Total Photos</label>
+            <label>Photos</label>
             <div class="value" id="statPhotos">0</div>
           </div>
           <div class="metric-card">
-            <label>Active Sessions</label>
+            <label>Live</label>
             <div class="value" id="statSessions">0</div>
           </div>
         </div>
 
         <div class="dashboard-grid" id="dashboardGrid">
-          <p class="loading-msg">Loading sessions...</p>
+          <p class="loading-msg">Loading…</p>
         </div>
       </div>
 
@@ -921,66 +141,66 @@
       <div class="tab-panel" id="tab-verify" role="tabpanel" aria-labelledby="nav-verify">
         <div class="dashboard-header">
           <div>
-            <h2 class="section-title">Crew Match Verification</h2>
-            <p class="section-sub">Review possible matches and record your crew’s decisions. Reviews do not yet change automatic search results.</p>
+            <h2 class="section-title">Second opinions.</h2>
+            <p class="section-sub">Same surfer or not? Face pairs only train the scoring; burst &amp; kit links below do show to surfers. <kbd>Y</kbd> same · <kbd>N</kbd> different · <kbd>S</kbd> skip.</p>
           </div>
-          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-            <button class="btn-sm btn-primary-sm" id="rescanVerifyBtn">🔍 Rescan Borderline Matches</button>
-            <button class="refresh-link" id="refreshVerifyBtn">↻ Refresh Queue</button>
-            <button class="btn-sm" id="retrainBtn" title="Refit fallback-match scoring from every confirmed/rejected review so far">🧠 Retrain from Reviews</button>
-            <span class="admin-notice" id="retrainStatus" style="margin:0;padding:6px 12px;font-size:10px;" hidden></span>
+          <div>
+            <button class="btn-sm btn-primary-sm" id="rescanVerifyBtn">Find borderline pairs</button>
+            <button class="refresh-link" id="refreshVerifyBtn">Refresh</button>
+            <button class="btn-sm" id="retrainBtn" title="Refit the scoring from every Same / Different call so far">Retrain scoring</button>
+            <span class="admin-notice" id="retrainStatus" hidden></span>
           </div>
         </div>
 
         <!-- Verification Stats Bar -->
-        <div class="metrics-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 24px;">
+        <div class="metrics-grid">
           <div class="metric-card">
-            <label>Ready to review</label>
+            <label>To review</label>
             <div class="value" id="verifyPending">0</div>
           </div>
           <div class="metric-card">
-            <label>Confirmed Matches</label>
-            <div class="value" id="verifyConfirmed" style="color:#4caf50;">0</div>
+            <label>Same</label>
+            <div class="value" id="verifyConfirmed">0</div>
           </div>
           <div class="metric-card">
-            <label>Dismissed / Rejected</label>
-            <div class="value" id="verifyRejected" style="color:var(--coral);">0</div>
+            <label>Different</label>
+            <div class="value" id="verifyRejected">0</div>
           </div>
         </div>
 
         <p class="admin-notice" id="reviewUnavailable" role="status" hidden></p><div class="verify-grid" id="verifyGrid">
-          <p class="loading-msg">Loading match verification queue...</p>
+          <p class="loading-msg">Looking for borderline pairs…</p>
         </div>
 
         <!-- Burst & Appearance Fallback Links -->
-        <div class="dashboard-header" style="margin-top:48px;">
+        <div class="dashboard-header">
           <div>
-            <h2 class="section-title">Burst &amp; Appearance Matches</h2>
-            <p class="section-sub">Photos with no clear face, linked to a confirmed shot by burst timing or clothing appearance. Confirming a link lets guests find these photos automatically; pending links never do.</p>
+            <h2 class="section-title">Same shot, no face.</h2>
+            <p class="section-sub">No clear face, but shot seconds apart or same kit as a confirmed one. Confirm and the surfer gets it too.</p>
           </div>
-          <div style="display:flex;gap:10px;align-items:center;">
-            <button class="btn-sm btn-primary-sm" id="rescanLinkBtn">🔍 Scan Burst &amp; Appearance Links</button>
-            <button class="refresh-link" id="refreshLinkBtn">↻ Refresh Queue</button>
+          <div>
+            <button class="btn-sm btn-primary-sm" id="rescanLinkBtn">Find links</button>
+            <button class="refresh-link" id="refreshLinkBtn">Refresh</button>
           </div>
         </div>
 
-        <div class="metrics-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 24px;">
+        <div class="metrics-grid">
           <div class="metric-card">
-            <label>Ready to review</label>
+            <label>To review</label>
             <div class="value" id="linkPending">0</div>
           </div>
           <div class="metric-card">
-            <label>Confirmed Links</label>
-            <div class="value" id="linkConfirmed" style="color:#4caf50;">0</div>
+            <label>Confirmed</label>
+            <div class="value" id="linkConfirmed">0</div>
           </div>
           <div class="metric-card">
-            <label>Dismissed / Rejected</label>
-            <div class="value" id="linkRejected" style="color:var(--coral);">0</div>
+            <label>Rejected</label>
+            <div class="value" id="linkRejected">0</div>
           </div>
         </div>
 
         <div class="verify-grid" id="linkGrid">
-          <p class="loading-msg">Loading burst &amp; appearance match queue...</p>
+          <p class="loading-msg">Looking for links…</p>
         </div>
       </div>
     </div>
@@ -989,12 +209,12 @@
     <dialog class="modal-overlay hidden" id="photoGalleryModal" aria-labelledby="galleryModalTitle">
       <div class="modal-card">
         <div class="modal-header">
-          <h3 id="galleryModalTitle">Session Photos</h3>
-          <button class="modal-close" id="closeGalleryModal" aria-label="Close photo gallery">×</button>
+          <h3 id="galleryModalTitle">Photos</h3>
+          <button class="modal-close" id="closeGalleryModal" aria-label="Close">×</button>
         </div>
         <div class="modal-body">
           <div class="admin-photo-grid" id="galleryGrid">
-            <p class="loading-msg">Loading photos...</p>
+            <p class="loading-msg">Loading…</p>
           </div>
         </div>
       </div>
@@ -1002,63 +222,63 @@
 
     <!-- ── Edit Session Modal ── -->
     <dialog class="modal-overlay hidden" id="editSessionModal" aria-labelledby="editModalTitle">
-      <div class="modal-card" style="max-width: 500px;">
+      <div class="modal-card">
         <div class="modal-header">
-          <h3 id="editModalTitle">Edit session details</h3>
-          <button class="modal-close" id="closeEditModal" aria-label="Close session editor">×</button>
+          <h3 id="editModalTitle">Edit session</h3>
+          <button class="modal-close" id="closeEditModal" aria-label="Close">×</button>
         </div>
         <div class="modal-body">
           <form id="editSessionForm">
             <input type="hidden" id="editSessionId" />
-            <div class="field" style="margin-bottom:14px;">
-              <label for="editTitle">Title</label>
+            <div class="field">
+              <label for="editTitle">Session</label>
               <input id="editTitle" type="text" maxlength="80" required />
             </div>
-            <div class="field" style="margin-bottom:14px;">
+            <div class="field">
               <label for="editDate">Date</label>
               <input id="editDate" type="date" required />
             </div>
-            <div class="field" style="margin-bottom:14px;">
-              <label for="editLocation">Location</label>
+            <div class="field">
+              <label for="editLocation">Break</label>
               <input id="editLocation" type="text" maxlength="80" required />
             </div>
-            <div class="field" style="margin-bottom:14px;">
+            <div class="field">
               <label for="editPrice">Price (₹)</label>
               <input id="editPrice" type="number" min="1" required />
             </div>
-            <div class="field" style="margin-bottom:20px;">
+            <div class="field">
               <label for="editStatus">Status</label>
-              <select id="editStatus" style="background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--text);padding:10px;border-radius:6px;width:100%;">
+              <select id="editStatus">
                 <option value="published">Published</option>
                 <option value="draft">Draft</option>
                 <option value="archived">Archived</option>
               </select>
             </div>
-            <button class="publish-btn" type="submit" style="width:100%;">Save Changes</button>
+            <button class="publish-btn" type="submit">Save</button>
           </form>
         </div>
       </div>
     </dialog>
 
     <!-- ── Upload More Photos Modal ── -->
-    <input id="morePhotoInput" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden />
+    <input id="morePhotoInput" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" multiple hidden />
     <dialog class="modal-overlay hidden" id="uploadMoreModal" aria-labelledby="moreModalTitle">
-      <div class="modal-card" style="max-width: 560px;">
+      <div class="modal-card">
         <div class="modal-header">
-          <h3 id="moreModalTitle">Upload more photos</h3>
-          <button class="modal-close" id="closeMoreModal" aria-label="Close upload">×</button>
+          <h3 id="moreModalTitle">Add photos</h3>
+          <button class="modal-close" id="closeMoreModal" aria-label="Close">×</button>
         </div>
         <div class="modal-body">
-          <p class="more-summary" id="moreSummary" role="status">Checking your selection…</p>
+          <p class="more-summary" id="moreSummary" role="status">Checking…</p>
           <div class="more-photos" id="morePhotos" hidden>
-            <h4 id="morePhotosTitle">Selected photos</h4>
+            <h4 id="morePhotosTitle">Photos</h4>
             <ul class="photo-list" id="morePhotoList"></ul>
           </div>
           <fieldset class="more-choice" id="moreChoice" hidden>
-            <legend>What should happen with the duplicates?</legend>
-            <label><input type="radio" name="duplicateMode" value="replace" /><span><strong>Replace the existing photos</strong><small>The new file overwrites the photo with the same name. Its faces are re-indexed and the old file is deleted.</small></span></label>
-            <label><input type="radio" name="duplicateMode" value="skip" checked /><span><strong>Upload only the new photos</strong><small>Duplicates are left out and the existing photos stay exactly as they are.</small></span></label>
-            <label><input type="radio" name="duplicateMode" value="rename" /><span><strong>Keep both as a copy</strong><small>Duplicates are uploaded with a numbered name, for example <code>IMG_0412-2.jpg</code>.</small></span></label>
+            <legend>Same names again — what now?</legend>
+            <label><input type="radio" name="duplicateMode" value="replace" /><span><strong>Replace</strong><small>New file wins, faces re-index.</small></span></label>
+            <label><input type="radio" name="duplicateMode" value="skip" checked /><span><strong>Skip</strong><small>Leave the old ones alone.</small></span></label>
+            <label><input type="radio" name="duplicateMode" value="rename" /><span><strong>Keep both</strong><small>Saved as <code>IMG_0412-2.jpg</code>.</small></span></label>
           </fieldset>
           <div class="upload-status" id="moreStatus" role="status"></div>
           <div class="progress-wrap hidden" id="moreProgressWrap">
@@ -1067,14 +287,38 @@
           </div>
           <div class="more-actions">
             <button class="more-cancel" type="button" id="moreCancelBtn">Cancel</button>
-            <button class="more-retry" type="button" id="moreRetryBtn" hidden>Retry failed uploads</button>
-            <button class="publish-btn" type="button" id="moreConfirmBtn" disabled>Upload photos <span>→</span></button>
+            <button class="more-retry" type="button" id="moreRetryBtn" hidden>Retry failed</button>
+            <button class="publish-btn" type="button" id="moreConfirmBtn" disabled>Upload</button>
           </div>
         </div>
       </div>
     </dialog>
 
+    <!-- ── Confirm dialog ── -->
+    <dialog class="modal-overlay hidden" id="confirmDialog" aria-labelledby="confirmTitle">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 id="confirmTitle">Sure?</h3>
+          <button class="modal-close" id="closeConfirmDialog" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <form id="confirmForm" method="dialog">
+            <p class="confirm-copy" id="confirmCopy"></p>
+            <div class="field confirm-typed" id="confirmTypedWrap" hidden>
+              <label for="confirmTypedInput" id="confirmTypedLabel">Type the name to confirm</label>
+              <input id="confirmTypedInput" type="text" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="more-actions">
+              <button class="more-cancel" type="button" id="confirmCancelBtn">Cancel</button>
+              <button class="delete-btn confirm-danger" type="submit" id="confirmOkBtn">Delete</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </dialog>
+
     <script src="config.js"></script>
+    <script src="soi-fx.js"></script>
     <script src="admin.js"></script>
   </body>
 </html>

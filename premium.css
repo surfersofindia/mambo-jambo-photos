@@ -1,6 +1,6 @@
 /* Motion is an enhancement: content remains visible if scripts are unavailable. */
-::selection{background:var(--ocean);color:#fff}
-.reading-progress{position:fixed;top:0;left:0;z-index:30;width:100%;height:2px;background:var(--sky);transform:scaleX(var(--read,0));transform-origin:left;pointer-events:none}
+::selection{background:var(--soi-terracotta);color:#fff}
+.reading-progress{position:fixed;top:0;left:0;z-index:30;width:100%;height:2px;background:var(--soi-slate-deep);transform:scaleX(var(--read,0));transform-origin:left;pointer-events:none}
 
 /* ticker marquee */
 .ticker-track{animation:none}
@@ -16,19 +16,12 @@ nav a:not(.nav-cta),footer a:not(.brand){position:relative}
 nav a:not(.nav-cta)::after,footer a:not(.brand)::after{content:'';position:absolute;left:0;bottom:-6px;width:100%;height:1px;background:currentColor;transform:scaleX(0);transform-origin:right;transition:transform var(--duration-base) var(--ease-out)}
 nav a:not(.nav-cta):hover::after,nav a[aria-current=location]::after,footer a:not(.brand):hover::after{transform:scaleX(1);transform-origin:left}
 
-.hero-bottom a:hover{background:rgba(255,255,255,.15);transform:translateY(3px)}
+/* a white wash is invisible on linen, so the hover tint is terracotta */
+.hero-bottom a:hover{background:var(--soi-terracotta-tint);transform:translateY(3px)}
 
-/* loader — a small blue "tide" of layered blobs */
-.loader span{position:absolute;inset:12px;border:1px solid rgba(38,74,107,.18);border-radius:47% 53% 62% 38%/40% 52% 48% 60%}
-.loader span:nth-child(2){inset:2px;border-color:rgba(38,74,107,.13);transform:rotate(50deg)}
-.loader span:nth-child(3){inset:22px;border-color:rgba(38,74,107,.24);transform:rotate(-40deg)}
-body.motion-enabled .loader span{animation:tide 7s linear infinite}
-body.motion-enabled .loader span:nth-child(2){animation-direction:reverse;animation-duration:10s}
-@keyframes tide{to{transform:rotate(360deg)}}
-
-.motion-toggle:hover span{background:rgba(255,255,255,.15)}
+.motion-toggle:hover span{background:#F2ECDB26}
 
 body.motion-paused *,body.motion-paused *::before,body.motion-paused *::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
 html:has(body.motion-paused){scroll-behavior:auto}
 @media(hover:none){.how-grid article:hover,.session-card:hover{transform:none}}
-@media(prefers-reduced-motion:reduce){.ticker-track,.loader span{animation:none!important}.reading-progress{display:none}}
+@media(prefers-reduced-motion:reduce){.ticker-track{animation:none!important}.reading-progress{display:none}}

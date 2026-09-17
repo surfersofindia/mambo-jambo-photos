@@ -8,6 +8,7 @@ Surf-session discovery, consent-based selfie matching, watermarked previews, tem
 - Cloudflare Worker for authenticated admin operations, matching, and signed media access.
 - Private R2 storage for originals and watermarked previews; D1 for metadata and face embeddings.
 - Python FastAPI / InsightFace service for face extraction.
+- Brand layer: `soi-tokens.css` (design tokens plus the shared toast, chip, empty-state, loader and action-bar components, loaded first on both the public and admin pages) and `soi-stamps.svg` (the linocut stamp sprite it references). Headings use the Fraunces display font from Google Fonts; UI text stays on Plus Jakarta Sans.
 
 ## Local development
 
@@ -39,7 +40,7 @@ There are no fabricated session or match results. Empty sessions and API failure
 1. Choose a published session.
 2. Select a valid JPG, PNG or WebP selfie up to 10 MB and consent to server processing.
 3. Search; cancel or retry if needed.
-4. Browse temporary watermarked previews, enlarge photos, and filter favourites. Favourites are held only in page memory and reset on a new search or reload.
+4. Browse temporary watermarked previews, enlarge photos (swipe / arrow keys / tap to zoom), and filter favourites. Favourites are held only in page memory and reset on a new search or reload. Signed preview links are refreshed automatically while the search is valid; after payment the browser keeps a 30-day gallery token in `localStorage` (`mjGallery`) so a guest can reopen their originals, and each original has a **Download** link (`?download=1` serves it as an attachment).
 
 The selfie is sent to the Worker and forwarded to the face service. The provided code does not persist guest selfies or their embeddings. D1 does store a search record with matched photo IDs; signed access expires, but records are not automatically deleted. Hosting-provider logging and retention must be reviewed separately. Session photos and indexed face embeddings remain stored until removed by the crew.
 
@@ -47,7 +48,7 @@ A guest's results are not only direct face matches: if a matched photo has a cre
 
 ## Crew flow
 
-Open `/admin.html` (or `/admin` on Vercel), sign in, create a session, upload images, and publish. The crew can manage sessions, inspect photos, reindex and review borderline face pairs, and set the photo-pack price guests pay to unlock originals. **Upload more** on a session card adds photos to a draft or published session; files whose names already exist in that session are listed first, and the crew chooses whether to replace the existing photos, upload only the new files, or keep both as numbered copies (`IMG_0412-2.jpg`). Reviewing face pairs records a crew decision; those decisions are not currently applied to guest match scoring.
+Open `/admin.html` (or `/admin` on Vercel), sign in (five failed attempts from one IP lock sign-in for 15 minutes once migration 0008 is applied), create a session, upload images, and publish. Uploads accept JPG, PNG, WebP and iPhone HEIC/HEIF files; HEIC is decoded in the browser before upload, which Safari and macOS do natively, while other browsers report a per-file error for that photo and continue with the rest. Uploads use the streaming Worker path (`UPLOAD_STREAMING` in `admin.js`) and send a 480px watermarked thumbnail per photo after the original (`POST /api/admin/photos/:id/thumb`); thumbnails are optional and only exist for photos uploaded after 0008. The crew can manage sessions, inspect photos, reindex and review borderline face pairs, and set the photo-pack price guests pay to unlock originals. **Upload more** on a session card adds photos to a draft or published session; files whose names already exist in that session are listed first, and the crew chooses whether to replace the existing photos, upload only the new files, or keep both as numbered copies (`IMG_0412-2.jpg`). Reviewing face pairs records a crew decision; those decisions are not currently applied to guest match scoring.
 
 The **Review matches** tab also surfaces two kinds of fallback links for photos with no usable face (the surfer facing away, for example): burst-sequence links to a photo shot within a couple of seconds of one that does have a face (`BURST_GAP_SECONDS`, default 2s), and clothing-appearance links to a photo with a detected face whose clothing color histogram closely matches (`APPEARANCE_THRESHOLD`, default 0.85 — see "Body/clothing appearance matching" below for how that signal is produced). "Scan Burst & Appearance Links" proposes candidates for the crew to confirm or reject. Unlike face-pair reviews, **confirming a link here does reach guests** — see "Guest flow" above and `/api/match` in `worker.js`.
 
@@ -73,16 +74,28 @@ npm test
 npx wrangler deploy --dry-run
 ```
 
-Tests cover matching with a mocked face service, deduplicated signed previews, original-photo isolation, authentication, session validation, streaming upload limits, CORS, Cashfree checkout/verification/webhook handling (mocked), public build asset completeness, burst-sequence grouping, burst/appearance fallback-link generation and review, the confirm/reject feedback log and weight-retraining logistic regression, and confirmed links extending a guest's matched photos. Browser and real-service end-to-end testing (including the actual HOG detector and EXIF parsing against real camera JPEGs, not just mocked face-service responses) are still required before launch.
+Tests cover matching with a mocked face service, deduplicated signed previews, original-photo isolation, authentication, session validation, streaming upload limits, CORS, the public health endpoint, Cashfree checkout/verification/webhook handling (mocked), public build asset completeness, burst-sequence grouping, burst/appearance fallback-link generation and review, the confirm/reject feedback log and weight-retraining logistic regression, and confirmed links extending a guest's matched photos. Browser and real-service end-to-end testing (including the actual HOG detector and EXIF parsing against real camera JPEGs, not just mocked face-service responses) are still required before launch.
 
 ## Deployment
 
-1. Verify D1 schema compatibility and private R2 storage. Apply `migrations/0002_cashfree_payments.sql`, `migrations/0004_capture_metadata.sql`, `migrations/0005_photo_links.sql`, `migrations/0006_photo_appearances.sql`, and `migrations/0007_match_learning.sql` if upgrading an existing database.
+1. Verify D1 schema compatibility and private R2 storage. Apply `migrations/0002_cashfree_payments.sql`, `migrations/0004_capture_metadata.sql`, `migrations/0005_photo_links.sql`, `migrations/0006_photo_appearances.sql`, `migrations/0007_match_learning.sql`, and `migrations/0008_thumbnails_and_login_throttle.sql` if upgrading an existing database. The Worker detects `photos.thumb_key` and `login_attempts` at runtime, so it can be deployed before 0008 is applied — grid tiles fall back to the 1400px preview and sign-in throttling is skipped until then.
 2. Configure Worker secrets `ADMIN_PASSWORD`, `SESSION_SECRET`, `CASHFREE_APP_ID`, `CASHFREE_SECRET_KEY`, and variables `ALLOWED_ORIGIN`, `FACE_API_URL`, `MATCH_THRESHOLD`, `CASHFREE_ENV` (`sandbox` or `production`). `BURST_GAP_SECONDS` (default 2) and `APPEARANCE_THRESHOLD` (default 0.85) are optional and only affect fallback-link candidate generation.
 3. In the Cashfree dashboard, point the webhook URL at `<worker-url>/api/payment/webhook` (version `2023-08-01` or later). Cashfree signs webhooks with the same `CASHFREE_SECRET_KEY` used for API calls — there is no separate webhook secret to configure.
 4. Deploy the Worker with `npm run deploy:api`.
 5. Set the public `config.js` API URL, then deploy to Vercel, which runs the build and serves `dist/`. Deploy API and frontend together because matching now requires the consent field.
 6. Test upload → indexing → publication → consent → matching → previews → checkout → payment verification → unlocked originals on desktop and mobile, using consented test photos and Cashfree sandbox test cards/UPI.
+
+### Health check
+
+`GET /api/health` on the Worker is public and uncached (`cache-control: no-store`). It returns `{ ok, checks: { db, r2, face }, time }` with HTTP 200 when every check is `ok` and 503 otherwise: `db` runs `SELECT 1` on D1, `r2` performs a `head()` on the photo bucket (a missing object is fine; only an R2 error fails), and `face` is `skipped` unless `?deep=1` is passed, in which case the face service must answer a `HEAD` request within 3 s — any HTTP status counts, including 405, since the point is reachability, not inference. Checks run independently, so one failure never hides another, and the response never carries error text or configuration values. The admin studio's topbar health pill polls this endpoint and shows API, R2 and face-service status; an uptime monitor can watch the same URL.
+
+### Download all
+
+`GET /api/searches/:id/download?token=<search or gallery token>` streams every original of a **paid** search as one ZIP (`surfers-of-india-<date>-<break>.zip`). Entries are stored, not deflated — JPEGs don't shrink and it keeps the Worker to a single CRC pass per byte — and the archive streams straight out of R2 with data descriptors, so nothing is buffered. When R2 reports object sizes the response carries an exact `Content-Length` (browser progress bars work) and packs above 4 GiB are refused with 413 (no ZIP64). The guest page shows **Download all** once a gallery is unlocked; unpaid searches get 402, bad tokens 401.
+
+### Content Security Policy
+
+Both hosts send the policy as `Content-Security-Policy-Report-Only` (`.htaccess` for Hostinger, `vercel.json` for the Vercel mirror), so browsers log violations to the console without blocking anything. Before enforcing it, complete one full sandbox payment (checkout → pay → return → download an original) with the browser console open and confirm no CSP reports appear; then rename the header to `Content-Security-Policy` in both files and redeploy. The policy allows scripts only from the site itself and `sdk.cashfree.com`, connections to the Worker and Cashfree, Cashfree frames, Google Fonts, and `blob:`/`data:` images for in-browser thumbnailing and HEIC decoding — any new script host or CDN must be added to the policy first.
 
 ## Outstanding launch validation
 

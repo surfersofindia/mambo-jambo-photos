@@ -28,6 +28,6 @@ test('crew controls and accessible tab panels have valid targets', async () => {
   assert.equal(ids.length, new Set(ids).size);
   for (const [, id] of script.matchAll(/getElementById\('([\w-]+)'\)/g)) assert.ok(ids.includes(id), `Missing crew control #${id}`);
   for (const [, id] of html.matchAll(/aria-(?:controls|labelledby)="([^"]+)"/g)) assert.ok(ids.includes(id));
-  assert.equal((html.match(/<dialog\b/g) || []).length, 3);
-  assert.equal((html.match(/<\/dialog>/g) || []).length, 3);
+  assert.equal((html.match(/<dialog\b/g) || []).length, 4);
+  assert.equal((html.match(/<\/dialog>/g) || []).length, 4);
 });

@@ -11,6 +11,9 @@
   let paused = false;
   try { paused = localStorage.getItem('mj-motion-paused') === 'true'; } catch { /* Storage is optional. */ }
   const enabled = () => !paused && !reduced.matches;
+  // Sections are pre-hidden by CSS (html.soi-reveal … :not(.is-revealed)) only while motion is on and this browser
+  // can actually reveal them; otherwise nothing is ever hidden pending JavaScript.
+  const canReveal = 'IntersectionObserver' in window && 'animate' in Element.prototype;
   function animate(element, frames, options = {}) {
     if (!element || !enabled() || !element.animate) return;
     const animation = element.animate(frames, { duration: 650, easing: 'cubic-bezier(.22,1,.36,1)', ...options });
@@ -22,6 +25,7 @@
   function applyPreference() {
     document.body.classList.toggle('motion-enabled', enabled());
     document.body.classList.toggle('motion-paused', !enabled());
+    document.documentElement.classList.toggle('soi-reveal', enabled() && canReveal);
     if (toggle) {
       toggle.hidden = reduced.matches;
       toggle.setAttribute('aria-pressed', String(paused));
@@ -52,7 +56,8 @@
       observer.unobserve(entry.target);
       if (revealed.has(entry.target)) return;
       revealed.add(entry.target);
-      animate(entry.target, rise, { duration: 850 });
+      // Mark before animating: the class lifts the CSS pre-hide, fill:'backwards' keeps opacity 0 until the first frame.
+      entry.target.classList.add('is-revealed'); animate(entry.target, rise, { duration: 850, fill: 'backwards' });
     });
   }, { threshold: .12 }) : null;
   function observeSections() {

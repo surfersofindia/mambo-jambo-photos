@@ -22,7 +22,7 @@
     "BURST_GAP_SECONDS": "2",
     "APPEARANCE_THRESHOLD": "0.85",
     "FACE_API_URL": "https://ankitkotian-mambo-jambo-face-api.hf.space/extract",
-    "CASHFREE_ENV": "sandbox"
+    "CASHFREE_ENV": "production"
   },
   "queues": {
     "producers": [

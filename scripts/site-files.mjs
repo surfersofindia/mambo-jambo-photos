@@ -4,5 +4,5 @@ export async function siteFiles() {
   const assets = (await readdir(new URL('assets/', root), { withFileTypes: true }))
     .filter(entry => entry.isFile() && /\.(png|jpg|jpeg|webp|svg|ico)$/i.test(entry.name))
     .map(entry => `assets/${entry.name}`);
-  return ['index.html', 'admin.html', 'about.html', 'contact.html', 'terms.html', 'refund-policy.html', 'app.js', 'admin.js', 'config.js', 'site.css', 'premium.css', 'effects.js', 'nav.js', 'admin-theme.css', 'soi-brand.css', '.htaccess', ...assets];
+  return ['index.html', 'admin.html', 'about.html', 'contact.html', 'terms.html', 'refund-policy.html', 'app.js', 'admin.js', 'config.js', 'site.css', 'premium.css', 'effects.js', 'nav.js', 'soi-fx.js', 'admin-theme.css', 'soi-brand.css', 'soi-tokens.css', 'soi-stamps.svg', '.htaccess', ...assets];
 }

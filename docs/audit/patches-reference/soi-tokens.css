@@ -1,0 +1,247 @@
+/* ============================================================================
+   SURFERS OF INDIA — Design tokens & brand components (v1)
+   Load AFTER site.css / admin-theme.css so these :root values win.
+   Public:  <link rel="stylesheet" href="soi-tokens.css">   (last in <head>)
+   Admin:   same, after admin-theme.css
+   ---------------------------------------------------------------------------
+   Palette is extracted from the linocut kit and contrast-checked (WCAG AA):
+     umber on linen 13.5:1 · terracotta on linen 4.9:1 · white on terracotta 5.8:1
+     white on slate-deep 5.3:1 · slate-deep on linen 4.5:1 · ochre-deep on linen 4.0:1
+   Raw slate (#7B9BB4) and raw ochre (#B9975B) are DECORATIVE ONLY — never text.
+   ========================================================================== */
+:root{
+  /* ── Brand hues ─────────────────────────────────────────────────────── */
+  --soi-terracotta:#A8482C;        /* primary accent: CTAs, active, focus ring, badges */
+  --soi-terracotta-deep:#8A3A22;   /* hover / pressed */
+  --soi-terracotta-tint:#F4E4DC;   /* soft fills, selected rows, toast bg */
+  --soi-slate:#7B9BB4;             /* secondary accent (decorative): board silhouette, tag fills */
+  --soi-slate-deep:#4E6F88;        /* secondary buttons (solid), metadata text */
+  --soi-slate-tint:#E3ECF2;        /* filter chips, active toggles bg */
+  --soi-ochre:#B9975B;             /* supporting neutral: outlines, dividers, hover fills */
+  --soi-ochre-deep:#8C6E3A;        /* ochre as (bold) text only */
+  --soi-sand:#E7DCC2;              /* card outlines, tag backgrounds */
+  --soi-sand-deep:#D9CBA6;         /* hover on sand */
+  --soi-linen:#F2ECDB;             /* page canvas (replaces #f5f8fb / #fff) */
+  --soi-surface:#FBF8F0;           /* cards, dialogs, inputs */
+  --soi-umber:#2B2018;             /* headings, body, dark footer */
+  --soi-umber-soft:#5C4F43;        /* muted copy (6.7:1 on linen) */
+  --soi-coral:#B66B78;             /* favourites ♥, decorative only */
+  --soi-plum:#5A2E3A;              /* deep accent for dark surfaces */
+
+  /* ── Semantic aliases: the existing stylesheets already read these ──── */
+  --white:var(--soi-surface);
+  --bg:var(--soi-linen);
+  --bg-tint:var(--soi-sand);
+  --surface:var(--soi-surface);
+  --ink:var(--soi-umber);
+  --text:var(--soi-umber);
+  --muted:var(--soi-umber-soft);
+  --line:var(--soi-sand);
+  --line-soft:#EFE7D3;
+  --border:var(--soi-sand);
+  --ocean:var(--soi-terracotta);        /* every "ocean" CTA becomes terracotta */
+  --ocean-hover:var(--soi-terracotta-deep);
+  --sky:var(--soi-slate-deep);          /* secondary: progress bar, step numbers */
+  --marker:var(--soi-terracotta);       /* admin: active tab, drop-zone hover */
+  --coral:var(--soi-terracotta-deep);   /* admin: danger buttons keep a warm, darker red */
+  --sage:var(--soi-slate);
+  --cream:var(--soi-linen);
+  --sand:var(--soi-sand);
+  --error:#9C3B24;  --error-bg:#F6E3DC;
+  --success:#3F6B4F; --success-bg:#E6EEE4;
+  --warning:#8C6E3A; --warning-bg:#F6EFDC;
+
+  /* ── Type ───────────────────────────────────────────────────────────── */
+  /* Plus Jakarta Sans stays for UI. Add Fraunces (soft, slightly hand-cut serif)
+     for display headings only — it reads like the linocut lettering without
+     being a novelty font.  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&display=swap"> */
+  --sans:'Plus Jakarta Sans',Arial,sans-serif;
+  --display:'Fraunces','Plus Jakarta Sans',Georgia,serif;
+  --mono:'Plus Jakarta Sans',ui-monospace,monospace; /* admin labels; keep the tracked-caps look */
+  --fs-eyebrow:11px; --fs-body:15px; --fs-caption:12px;
+  --lh-body:1.65;
+
+  /* ── Shape & depth ──────────────────────────────────────────────────── */
+  --radius-card:16px;     /* photos & cards: soft, not pill */
+  --radius-btn:12px;
+  --radius-chip:999px;
+  --radius-input:10px;
+  --shadow-card:0 1px 2px rgba(43,32,24,.05),0 14px 34px -22px rgba(43,32,24,.25);
+  --shadow-card-hover:0 2px 4px rgba(43,32,24,.06),0 24px 48px -24px rgba(43,32,24,.32);
+  --shadow-float:0 18px 48px -16px rgba(43,32,24,.45);  /* toasts, bottom bar */
+  --ring:0 0 0 3px var(--soi-linen),0 0 0 5px var(--soi-terracotta);
+
+  /* ── Motion ─────────────────────────────────────────────────────────── */
+  --ease-out:cubic-bezier(.22,1,.36,1);
+  --ease-spring:cubic-bezier(.34,1.4,.64,1);  /* lightbox open, chip select */
+  --duration-fast:140ms; --duration-base:240ms; --duration-slow:420ms;
+}
+
+/* ── Base surfaces ─────────────────────────────────────────────────────── */
+body{background:var(--soi-linen);color:var(--soi-umber)}
+::selection{background:var(--soi-terracotta);color:#fff}
+:focus-visible{outline:2px solid var(--soi-terracotta);outline-offset:3px}
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--soi-terracotta)!important;outline-offset:3px}
+
+/* Display type: headings get the serif, everything else stays sans */
+h1,h2,.results h1,.section-title,.login-card h2,.studio-heading h1,.drop-zone h3{font-family:var(--display);font-weight:500;letter-spacing:-.01em}
+h1 em,h2 em{font-style:italic;font-weight:500;color:var(--soi-terracotta)}
+.eyebrow{color:var(--soi-terracotta)}
+
+/* Hero: linen wash instead of white scrim (public) */
+.hero{background:linear-gradient(180deg,var(--soi-surface) 0%,var(--soi-linen) 100%)}
+.hero-photo::after{background:linear-gradient(180deg,#FBF8F0 0%,#FBF8F0F0 30%,#F2ECDBCC 58%,#E7DCC280 100%)}
+.soi-title span,.hero-hand,.soi-tagline{color:var(--soi-terracotta)}
+.ticker{background:var(--soi-sand)} .ticker-group span{color:var(--soi-terracotta)}
+
+/* Header / footer */
+.header{background:#F2ECDBEE}
+.header.is-scrolled{border-color:var(--soi-sand);box-shadow:0 8px 24px -20px rgba(43,32,24,.45)}
+.how,footer{background:var(--soi-umber);color:var(--soi-linen)}
+.step-number{color:var(--soi-ochre)}
+footer::before{background:var(--soi-umber)}
+
+/* ── Buttons ───────────────────────────────────────────────────────────── */
+.button,.nav-cta,.publish-btn,.choose-btn,.btn-publish,.verify-actions .confirm-btn{
+  background:var(--soi-terracotta);color:#fff;border-radius:var(--radius-btn);
+  box-shadow:0 6px 18px -8px rgba(168,72,44,.55);
+  transition:background var(--duration-base) var(--ease-out),transform var(--duration-fast) var(--ease-out),box-shadow var(--duration-base) var(--ease-out)}
+.button:hover,.nav-cta:hover,.publish-btn:hover,.choose-btn:hover,.btn-publish:hover{background:var(--soi-terracotta-deep)!important;transform:translateY(-1px);box-shadow:0 12px 26px -10px rgba(168,72,44,.6)}
+.button:active,.publish-btn:active,.choose-btn:active{transform:translateY(0) scale(.985);box-shadow:none}
+.button:disabled,.publish-btn:disabled{background:var(--soi-sand-deep);color:var(--soi-umber-soft);box-shadow:none;transform:none;opacity:1}
+/* secondary: slate solid (deep for contrast) */
+.button--secondary,.btn-primary-sm,.filter-button[aria-pressed=true],.tab-btn.active{background:var(--soi-slate-deep)!important;color:#fff!important;border-color:var(--soi-slate-deep)!important}
+.button--secondary:hover,.btn-primary-sm:hover{background:#3F5D74!important}
+/* ghost / text */
+.text-button,.refresh-link,.back-link,.review-skip{color:var(--soi-terracotta);min-height:44px;display:inline-flex;align-items:center;padding:10px 6px}
+.btn-sm,.delete-btn,.sign-out-btn,.more-cancel{min-height:44px;padding:10px 16px;border-radius:var(--radius-chip);border:1px solid var(--soi-sand);background:var(--soi-surface);color:var(--soi-umber)}
+.btn-sm:hover{background:var(--soi-sand)}
+.delete-btn,.confirm-danger,.photo-delete-btn,.reject-btn{color:#fff!important;background:var(--soi-terracotta-deep)!important;border-color:var(--soi-terracotta-deep)!important}
+.reject-btn,.delete-btn{background:var(--soi-surface)!important;color:var(--soi-terracotta-deep)!important;border:1px solid var(--soi-terracotta)!important}
+
+/* ── Chips & badges (linocut-stamp feel: sand fill, ochre hairline) ─────── */
+.chip,.session-recent,.d-card-status,.indexing-badge,.photo-row-tag,.photo-badge{
+  display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:4px 10px;border-radius:var(--radius-chip);
+  font:600 11px/1 var(--sans);letter-spacing:.3px;text-transform:none;
+  background:var(--soi-sand);color:var(--soi-umber);border:1px solid var(--soi-ochre)}
+.chip--slate,.indexing-badge.processing,.d-card-status.published{background:var(--soi-slate-tint);border-color:var(--soi-slate);color:var(--soi-slate-deep)}
+.chip--terracotta,.indexing-badge.warning{background:var(--soi-terracotta-tint);border-color:var(--soi-terracotta);color:var(--soi-terracotta-deep)}
+.chip--stamp{padding-left:8px}          /* leaves room for a 16px stamp icon */
+.chip--stamp svg{width:16px;height:16px;fill:currentColor}
+/* horizontal chip rail (mobile filters) */
+.chip-rail{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x proximity;padding:4px 16px 8px;margin:0 -16px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.chip-rail::-webkit-scrollbar{display:none}
+.chip-rail .chip{scroll-snap-align:start;flex:none;min-height:40px;padding:8px 14px}
+.chip-rail .chip[aria-pressed=true]{background:var(--soi-slate-deep);border-color:var(--soi-slate-deep);color:#fff}
+
+/* ── Cards, inputs ─────────────────────────────────────────────────────── */
+.finder-card,.pricing-card,.d-card,.metric-card,.verify-card,.login-card,.file-queue,.more-photos,.modal-card{
+  background:var(--soi-surface);border:1px solid var(--soi-sand);border-radius:var(--radius-card);box-shadow:var(--shadow-card)}
+.finder-card:focus-within,.pricing-card:hover,.d-card:hover{box-shadow:var(--shadow-card-hover);border-color:var(--soi-ochre)}
+input,select,textarea,#sessionFilter,#checkoutDialog input,.field input,.field select,.login-card .password-field input{
+  font-size:16px!important; /* ≥16px stops iOS Safari zooming on focus */
+  background:var(--soi-surface)!important;border:1px solid var(--soi-sand)!important;border-radius:var(--radius-input)!important;color:var(--soi-umber)}
+input:focus,select:focus,textarea:focus{border-color:var(--soi-terracotta)!important;box-shadow:0 0 0 4px rgba(168,72,44,.14)}
+.session-choice:hover,.session-choice:has(input:checked),.more-choice label:has(input:checked){border-color:var(--soi-terracotta)!important;background:var(--soi-terracotta-tint)!important}
+.session-choice:has(input:checked){box-shadow:0 0 0 1px var(--soi-terracotta)}
+.session-choice:has(input:checked) .session-check{background:var(--soi-terracotta);border-color:var(--soi-terracotta)}
+.consent input,.more-choice input,.review-zoom input{accent-color:var(--soi-terracotta)}
+.consent input{width:22px;height:22px}          /* was 17px */
+.upload-zone,.drop-zone{background:var(--soi-sand);border:1.5px dashed var(--soi-ochre);border-radius:var(--radius-card)}
+.upload-zone:hover,.upload-zone:focus-within,.drop-zone:hover,.drop-zone.dragging{background:var(--soi-terracotta-tint);border-color:var(--soi-terracotta)}
+
+/* ── Notices, toasts ───────────────────────────────────────────────────── */
+.notice,.admin-notice,.resume-notice{background:var(--soi-sand);border:1px solid var(--soi-ochre);border-left:4px solid var(--soi-terracotta);border-radius:var(--radius-btn);color:var(--soi-umber)}
+.status.error,.upload-status.error,.login-error{color:var(--error)}
+.upload-status.error{background:var(--error-bg);border-color:#D9A99A}
+.soi-toasts{position:fixed;left:16px;right:16px;bottom:max(16px,env(safe-area-inset-bottom));z-index:200;display:grid;gap:10px;pointer-events:none}
+@media(min-width:700px){.soi-toasts{left:auto;width:380px}}
+.soi-toast{pointer-events:auto;display:grid;grid-template-columns:22px 1fr auto;gap:12px;align-items:start;padding:14px 16px;border-radius:var(--radius-btn);
+  background:var(--soi-umber);color:var(--soi-linen);box-shadow:var(--shadow-float);border-left:4px solid var(--soi-terracotta);font:500 13px/1.5 var(--sans)}
+.soi-toast[data-kind=success]{border-left-color:#7FB08C}
+.soi-toast[data-kind=error]{border-left-color:#E07A5F}
+.soi-toast svg{width:22px;height:22px;fill:var(--soi-ochre)}
+.soi-toast button{background:none;border:0;color:var(--soi-linen);opacity:.7;min-width:44px;min-height:44px;margin:-11px -12px -11px 0}
+.soi-toast button:hover{opacity:1}
+@media(prefers-reduced-motion:no-preference){
+  .soi-toast{animation:soi-toast-in var(--duration-slow) var(--ease-spring)}
+  @keyframes soi-toast-in{from{opacity:0;transform:translateY(12px) scale(.97)}to{opacity:1;transform:none}}
+}
+
+/* ── Empty states: linocut stamp + one line ────────────────────────────── */
+.soi-empty{display:grid;justify-items:center;gap:14px;padding:44px 20px;text-align:center;color:var(--soi-umber-soft);
+  background:var(--soi-surface);border:1px dashed var(--soi-ochre);border-radius:var(--radius-card)}
+.soi-empty svg{width:88px;height:88px;fill:var(--soi-ochre);opacity:.9}
+.soi-empty strong{font:500 20px/1.2 var(--display);color:var(--soi-umber)}
+.soi-empty p{margin:0;font-size:14px;max-width:34ch}
+
+/* ── Wave loader (replaces the faint tide-blob loader) ─────────────────── */
+.soi-loader{width:112px;height:64px;margin:20px auto;display:block}
+.soi-loader .crest{fill:none;stroke:var(--soi-slate-deep);stroke-width:5;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:180;stroke-dashoffset:180}
+.soi-loader .fin{fill:var(--soi-terracotta);transform-origin:56px 52px}
+body.motion-enabled .soi-loader .crest{animation:soi-crest 1.6s var(--ease-out) infinite}
+body.motion-enabled .soi-loader .fin{animation:soi-fin 1.6s var(--ease-out) infinite}
+@keyframes soi-crest{0%{stroke-dashoffset:180;opacity:0}25%{opacity:1}70%{stroke-dashoffset:0;opacity:1}100%{stroke-dashoffset:0;opacity:0}}
+@keyframes soi-fin{0%,100%{transform:translateX(-26px) rotate(-6deg)}50%{transform:translateX(26px) rotate(6deg)}}
+/* button spinner: a tiny fin instead of a ring */
+.button.is-busy span,.publish-btn.is-busy span{border:0;width:16px;height:16px;border-radius:0;
+  background:currentColor;clip-path:path('M2 15 C2 8 7 3 12 1 C10 6 11 11 14 15 Z');animation:soi-fin-spin .9s var(--ease-out) infinite}
+@keyframes soi-fin-spin{0%,100%{transform:rotate(-14deg) translateY(1px)}50%{transform:rotate(14deg) translateY(-1px)}}
+
+/* ── Photo tiles & lightbox ────────────────────────────────────────────── */
+.photo-open{border-radius:var(--radius-card);background:var(--soi-sand)}
+.photo-open img{transition:transform var(--duration-slow) var(--ease-out),opacity var(--duration-base),filter var(--duration-base)}
+.photo-open img[data-blur]{filter:blur(14px);transform:scale(1.06)}   /* LQIP until decoded */
+figure.is-loading .photo-open::after{background:linear-gradient(90deg,transparent,#FBF8F0B3,transparent)}
+figure.is-broken .photo-open{display:grid;place-items:center;aspect-ratio:4/3;color:var(--soi-umber-soft);font-size:12px}
+figure.is-broken .photo-open img{display:none}
+figure.is-broken .photo-open::before{content:'';width:56px;height:56px;background:var(--soi-ochre);
+  mask:url(soi-stamps.svg#stamp-starfish) center/contain no-repeat;-webkit-mask:url(soi-stamps.svg#stamp-starfish) center/contain no-repeat}
+.favourite{width:48px;height:48px;background:var(--soi-surface);color:var(--soi-umber)}
+.favourite[aria-pressed=true]{background:var(--soi-coral);color:#fff}
+@media(max-width:650px){.favourite{width:44px;height:44px;right:8px;top:8px}}
+.gallery figcaption{color:var(--soi-umber-soft)} .gallery figcaption a{color:var(--soi-terracotta)}
+dialog#lightbox{background:#1B1410;color:var(--soi-linen)}
+dialog#lightbox::backdrop{background:#1B1410EA}
+@starting-style{dialog[open]{opacity:0;transform:translateY(18px) scale(.97)}}
+dialog[open]{transition:opacity var(--duration-base) var(--ease-out),transform var(--duration-slow) var(--ease-spring)}
+.lightbox-download{background:var(--soi-terracotta);color:#fff}
+.lightbox-download:hover{background:var(--soi-terracotta-deep)}
+/* Watermark for the linocut era: a corner stamp (wave crest) instead of tiled text — see admin.fixes.js */
+
+/* ── Sticky bottom action bar (mobile results) ─────────────────────────── */
+.soi-actionbar{position:fixed;left:0;right:0;bottom:0;z-index:40;display:none;gap:10px;align-items:center;
+  padding:10px 16px max(10px,env(safe-area-inset-bottom));background:#FBF8F0F2;backdrop-filter:blur(14px);
+  border-top:1px solid var(--soi-sand);box-shadow:0 -12px 32px -20px rgba(43,32,24,.35)}
+.soi-actionbar .button{flex:1;min-height:52px;justify-content:space-between}
+.soi-actionbar .filter-button{min-height:52px;min-width:52px;padding:0 16px}
+@media(max-width:650px){
+  .results:not([hidden]) ~ .soi-actionbar,.results:not([hidden]) .soi-actionbar{display:flex}
+  .results{padding-bottom:96px}   /* keep last row above the bar */
+  #unlockButton,.results .filter-button{display:none} /* the bar owns these on phones */
+}
+
+/* ── Admin specifics ───────────────────────────────────────────────────── */
+.topbar{background:#F2ECDBEE}
+.topbar-brand small{color:var(--soi-terracotta)}
+.tabs{background:var(--soi-sand);border-color:var(--soi-ochre)}
+.tab-btn{font-size:13px;min-height:48px}
+.tab-btn.active{box-shadow:0 3px 10px rgba(43,32,24,.12)}
+.metric-card .value{color:var(--soi-terracotta);font-family:var(--display);font-weight:500;font-size:30px}
+.card-progress-track{background:var(--soi-sand)} .card-progress-fill,.progress-bar-fill{background:linear-gradient(90deg,var(--soi-slate-deep),var(--soi-terracotta))}
+.file-queue button,.photo-row button{min-height:44px;min-width:64px;padding:8px 12px;border-radius:var(--radius-chip);color:var(--soi-terracotta-deep)}
+.file-queue-head button{min-height:40px}
+.photo-card{border-radius:var(--radius-btn);border-color:var(--soi-sand)}
+.photo-card.is-cover{border-color:var(--soi-terracotta);box-shadow:0 0 0 2px var(--soi-terracotta)}
+.photo-cover-btn:hover,.photo-card.is-cover .photo-cover-btn{background:var(--soi-terracotta)}
+.photo-delete-btn,.photo-cover-btn{min-height:40px;min-width:44px}
+.review-score{background:var(--soi-slate-tint);color:var(--soi-slate-deep)}
+.verify-card.is-active{outline:2px solid var(--soi-terracotta);outline-offset:4px}   /* which card Y/N/S hits */
+.studio-badge{display:none}   /* redundant with the eyebrow + brand mark */
+.sign-out-btn{min-height:44px}
+/* drop-zone pattern: faint repeating wave crest stamp */
+.drop-zone{background-image:url(soi-stamps.svg#pattern-wave);background-size:120px 60px;background-blend-mode:multiply}
+.drop-zone.dragging{background-image:none}
+
+/* ── Reduced motion ────────────────────────────────────────────────────── */
+@media(prefers-reduced-motion:reduce){.soi-loader .crest,.soi-loader .fin,.soi-toast{animation:none!important}.soi-loader .crest{stroke-dashoffset:0}}

@@ -27,7 +27,11 @@
         },
         {
           "key": "Permissions-Policy",
-          "value": "camera=(), microphone=(), geolocation=()"
+          "value": "camera=(self), microphone=(), geolocation=()"
+        },
+        {
+          "key": "Content-Security-Policy-Report-Only",
+          "value": "default-src 'self'; script-src 'self' https://sdk.cashfree.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' blob: data: https://mambo-jambo-photo-api.surfersofindia.workers.dev; connect-src 'self' https://mambo-jambo-photo-api.surfersofindia.workers.dev https://sdk.cashfree.com https://api.cashfree.com https://sandbox.cashfree.com; frame-src https://*.cashfree.com https://sdk.cashfree.com; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
         }
       ]
     }

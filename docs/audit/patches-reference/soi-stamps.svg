@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SURFERS OF INDIA — linocut stamp sprite (PLACEHOLDER GEOMETRY)
+  ────────────────────────────────────────────────────────────────────────
+  These paths are simplified stand-ins so the CSS/JS wiring works today.
+  Replace each <symbol> body with the traced vector from the brand kit
+  (Illustrator → Image Trace → "Black and White Logo" → Expand → export
+  each motif as a 0 0 100 100 viewBox path). Keep the ids unchanged.
+
+  Usage (inline):   <svg class="stamp"><use href="soi-stamps.svg#stamp-wave"/></svg>
+  Usage (CSS bg):   background:url(soi-stamps.svg#pattern-wave)  → uses the <view>
+  Usage (CSS mask): mask:url(soi-stamps.svg#view-starfish)
+  Colour: symbols use fill="currentColor" so `color:` on the <svg> tints them.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="200" viewBox="0 0 200 200">
+  <defs>
+    <!-- Hand-drawn wave crest (hero, loader, footer, tile watermark) -->
+    <symbol id="stamp-wave" viewBox="0 0 100 100">
+      <path fill="currentColor" d="M8 78c10-3 18-2 28-8 8-5 13-13 12-24-1-9-8-17-18-18 12-4 26 1 31 13 4 10 1 22-6 30 9-2 16-8 20-16 5-11 2-24-6-32 14 4 24 17 22 33-2 17-16 29-33 30 6 0 12-1 18-3-9 6-21 8-32 6-12-2-24-3-36-1z"/>
+      <path fill="currentColor" d="M6 86h60c2 0 2 3 0 3H6c-2 0-2-3 0-3zm10 6h34c2 0 2 3 0 3H16c-2 0-2-3 0-3z"/>
+    </symbol>
+    <!-- Single fin (spinner, "busy" buttons, active-step marker) -->
+    <symbol id="stamp-fin" viewBox="0 0 100 100">
+      <path fill="currentColor" d="M72 12c-2 22-14 40-30 52-10 8-22 12-34 14 4 0 8 0 12-1-6 3-12 5-18 6h84c-3-8-8-14-14-19 6-16 6-34 0-52z"/>
+      <path fill="currentColor" d="M10 92h84c1 0 1 3 0 3H10c-1 0-1-3 0-3z"/>
+    </symbol>
+    <!-- Longboard silhouette (session card tag, "your board" future feature) -->
+    <symbol id="stamp-board" viewBox="0 0 100 100">
+      <path fill="currentColor" d="M50 2c14 0 22 30 22 52 0 20-8 44-22 44S28 74 28 54C28 32 36 2 50 2zm0 8c-1 20-2 40-1 60h2c1-20 0-40-1-60z"/>
+    </symbol>
+    <!-- Starfish (broken-image & "no photos" empty state) -->
+    <symbol id="stamp-starfish" viewBox="0 0 100 100">
+      <path fill="currentColor" d="M50 4l12 30 32 3-24 21 8 32-28-18-28 18 8-32L6 37l32-3z"/>
+      <g fill="#F2ECDB"><circle cx="50" cy="22" r="2"/><circle cx="50" cy="34" r="2"/><circle cx="30" cy="42" r="2"/><circle cx="70" cy="42" r="2"/><circle cx="38" cy="62" r="2"/><circle cx="62" cy="62" r="2"/><circle cx="50" cy="48" r="2.5"/></g>
+    </symbol>
+    <!-- Seashell (favourites empty state) -->
+    <symbol id="stamp-shell" viewBox="0 0 100 100">
+      <path fill="currentColor" d="M18 40c10-16 30-26 50-24 14 2 22 12 22 24 0 16-14 30-32 38-12 6-26 8-40 6 8-6 14-14 16-24-8 2-16 0-16-8 0-4 2-8 0-12z"/>
+    </symbol>
+    <!-- Coral (matching stage, "processing" states) -->
+    <symbol id="stamp-coral" viewBox="0 0 100 100">
+      <path fill="currentColor" d="M46 96V60c-8 0-16-6-16-16 0-6 4-10 4-16 0-8-6-12-6-20 6 2 12 8 12 16 0 6-4 10-4 16 0 6 4 10 10 10V32c-6-4-8-12-6-20 6 4 10 10 10 18v20c6 0 10-4 10-10 0-6-4-10-4-16 0-8 6-14 12-16 0 8-6 12-6 20 0 6 4 10 4 16 0 10-8 16-16 16v36z"/>
+    </symbol>
+    <!-- Split coconut (pricing / "unlocked" stamp) -->
+    <symbol id="stamp-coconut" viewBox="0 0 100 100">
+      <path fill="currentColor" d="M50 8a42 42 0 1 1 0 84 42 42 0 0 1 0-84zm0 12a30 30 0 1 0 0 60 30 30 0 0 0 0-60zm0 12a18 18 0 1 1 0 36 18 18 0 0 1 0-36z"/>
+    </symbol>
+    <!-- Linocut hibiscus (solid block, used as a corner "stamp" badge) -->
+    <symbol id="stamp-hibiscus" viewBox="0 0 100 100">
+      <rect width="100" height="100" rx="8" fill="currentColor"/>
+      <g fill="#F2ECDB"><path d="M50 20c6 10 16 14 26 12-4 10-2 20 6 26-10 2-18 10-20 20-8-6-18-6-26 0-2-10-10-18-20-20 8-6 10-16 6-26 10 2 20-2 26-12z"/><circle cx="50" cy="52" r="5" fill="currentColor"/></g>
+    </symbol>
+    <!-- Sunburst block (success / "published" / payment received) -->
+    <symbol id="stamp-sunburst" viewBox="0 0 100 100">
+      <rect width="100" height="100" rx="8" fill="currentColor"/>
+      <g fill="#F2ECDB"><circle cx="50" cy="50" r="10"/>
+        <path d="M50 8l4 24h-8zM50 92l-4-24h8zM8 50l24-4v8zM92 50l-24 4v-8zM20 20l20 14-6 6zM80 80L60 66l6-6zM80 20L66 40l-6-6zM20 80l14-20 6 6z"/></g>
+    </symbol>
+
+    <!-- Tiling wave pattern for the admin drop-zone -->
+    <pattern id="wavePattern" width="120" height="60" patternUnits="userSpaceOnUse">
+      <path fill="none" stroke="#B9975B" stroke-opacity=".28" stroke-width="2" stroke-linecap="round" d="M0 40c15-18 30-18 45 0s30 18 45 0 30-18 45 0M0 20c15-18 30-18 45 0s30 18 45 0"/>
+    </pattern>
+  </defs>
+
+  <!-- <view> fragments make individual motifs addressable from CSS url(...#id) -->
+  <view id="view-starfish" viewBox="0 0 100 100"/>
+  <view id="pattern-wave" viewBox="0 120 120 60"/>
+  <g id="renders" style="color:#B9975B">
+    <use href="#stamp-starfish" x="0" y="0" width="100" height="100"/>
+    <rect x="0" y="0" width="120" height="60" fill="url(#wavePattern)" transform="translate(0,120)"/>
+  </g>
+</svg>

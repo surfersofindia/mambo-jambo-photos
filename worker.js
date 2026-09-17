@@ -205,18 +205,129 @@ function similarity(a, b) {
 // Cosine similarity over normalized clothing-color histograms — same shape as similarity() above,
 // separate name because the vectors come from a different signal (appearance, not a face embedding).
 const histogramSimilarity = similarity;
-async function mediaToken(photoId, variant, env) {
-  return sign({ scope: 'media', photoId, variant, exp: Date.now() + 20 * 60_000 }, env);
+const MEDIA_TOKEN_MINUTES = { preview: 45, thumb: 45, original: 30 };
+async function mediaToken(photoId, variant, env, minutes = MEDIA_TOKEN_MINUTES[variant] || 20) {
+  return sign({ scope: 'media', photoId, variant, exp: Date.now() + minutes * 60_000 }, env);
+}
+async function mediaLink(base, photoId, variant, env, extra = '') {
+  return `${base}/api/media/${photoId}?variant=${variant}&token=${encodeURIComponent(await mediaToken(photoId, variant, env))}${extra}`;
+}
+// `photos.thumb_key` arrived in migration 0008. Detect it once per isolate so every read keeps
+// working (without thumbnails) on a database that has not been migrated yet.
+const columnCache = new WeakMap(); // per D1 binding, so a fresh binding (or test double) re-checks
+async function hasColumn(env, table, column) {
+  if (!env.DB || typeof env.DB !== 'object') return false;
+  if (!columnCache.has(env.DB)) columnCache.set(env.DB, new Map());
+  const cache = columnCache.get(env.DB); const key = `${table}.${column}`;
+  if (!cache.has(key)) {
+    cache.set(key, (async () => {
+      try { const info = await env.DB.prepare(`PRAGMA table_info(${table})`).all(); return (info.results || []).some(row => row.name === column); }
+      catch { return false; }
+    })());
+  }
+  return cache.get(key);
+}
+async function thumbColumn(env) { return (await hasColumn(env, 'photos', 'thumb_key')) ? ', thumb_key' : ''; }
+// Grid tiles use the small thumbnail when one exists and fall back to the 1400px preview otherwise.
+async function previewLinks(base, photo, env) {
+  const url = await mediaLink(base, photo.id, 'preview', env);
+  return { url, thumbUrl: photo.thumb_key ? await mediaLink(base, photo.id, 'thumb', env) : url };
+}
+async function previewPayload(search, request, env) {
+  const photoIds = JSON.parse(search.matched_photo_ids_json);
+  if (!photoIds.length) return [];
+  const rows = await env.DB.prepare(`SELECT id${await thumbColumn(env)} FROM photos WHERE session_id = ? AND id IN (${photoIds.map(() => '?').join(',')})`)
+    .bind(search.session_id, ...photoIds).all();
+  const base = new URL(request.url).origin;
+  return Promise.all(rows.results.map(async photo => ({ photoId: photo.id, ...(await previewLinks(base, photo, env)) })));
 }
 async function accessPayload(search, request, env) {
   const photoIds = JSON.parse(search.matched_photo_ids_json);
-  const rows = await env.DB.prepare(`SELECT id FROM photos WHERE session_id = ? AND id IN (${photoIds.map(() => '?').join(',')})`)
+  if (!photoIds.length) return [];
+  const rows = await env.DB.prepare(`SELECT id${await thumbColumn(env)} FROM photos WHERE session_id = ? AND id IN (${photoIds.map(() => '?').join(',')})`)
     .bind(search.session_id, ...photoIds).all();
   const base = new URL(request.url).origin;
-  return Promise.all(rows.results.map(async ({ id: photoId }) => ({
-    photoId,
-    url: `${base}/api/media/${photoId}?variant=original&token=${encodeURIComponent(await mediaToken(photoId, 'original', env))}`,
-  })));
+  return Promise.all(rows.results.map(async photo => {
+    const url = await mediaLink(base, photo.id, 'original', env);
+    return { photoId: photo.id, url, downloadUrl: `${url}&download=1`, thumbUrl: photo.thumb_key ? await mediaLink(base, photo.id, 'thumb', env) : url };
+  }));
+}
+// ── Download all: a stored (uncompressed) ZIP streamed straight out of R2 ──────
+// JPEGs don't compress, so STORE keeps the Worker's cost to one CRC pass per byte and
+// lets the archive stream without ever buffering a photo. Data descriptors (flag bit 3)
+// put each entry's CRC/size after its bytes, so nothing is read twice. No ZIP64: a
+// pack is refused above 4 GiB, which is far beyond any session pack.
+const CRC_TABLE = Int32Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; return c; });
+function crc32(crc, bytes) { crc = ~crc; for (let i = 0; i < bytes.length; i += 1) crc = CRC_TABLE[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8); return ~crc; }
+const le16 = value => [value & 255, (value >>> 8) & 255];
+const le32 = value => [value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255];
+function dosDateTime(date = new Date()) {
+  return { time: (date.getHours() << 11) | (date.getMinutes() << 5) | (date.getSeconds() >> 1), date: ((date.getFullYear() - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate() };
+}
+const ZIP_FLAGS = 0x0808; // bit 3: data descriptor follows the data · bit 11: UTF-8 names
+function zipLocalHeader(name, stamp) { return Uint8Array.from([...le32(0x04034B50), ...le16(20), ...le16(ZIP_FLAGS), ...le16(0), ...le16(stamp.time), ...le16(stamp.date), ...le32(0), ...le32(0), ...le32(0), ...le16(name.length), ...le16(0), ...name]); }
+function zipDescriptor(crc, size) { return Uint8Array.from([...le32(0x08074B50), ...le32(crc), ...le32(size), ...le32(size)]); }
+function zipCentralEntry(entry, stamp) { return Uint8Array.from([...le32(0x02014B50), ...le16(20), ...le16(20), ...le16(ZIP_FLAGS), ...le16(0), ...le16(stamp.time), ...le16(stamp.date), ...le32(entry.crc), ...le32(entry.size), ...le32(entry.size), ...le16(entry.name.length), ...le16(0), ...le16(0), ...le16(0), ...le16(0), ...le32(0), ...le32(entry.offset), ...entry.name]); }
+function zipEnd(count, cdSize, cdOffset) { return Uint8Array.from([...le32(0x06054B50), ...le16(0), ...le16(0), ...le16(count), ...le16(count), ...le32(cdSize), ...le32(cdOffset), ...le16(0)]); }
+// Exact archive length when every object size is known up front, so the browser can show progress.
+function zipLength(files) { return files.reduce((sum, file) => sum + 30 + file.name.length + file.size + 16 + 46 + file.name.length, 0) + 22; }
+function zipStream(files, env, onError) {
+  const { readable, writable } = new TransformStream();
+  const stamp = dosDateTime();
+  const pump = (async () => {
+    const writer = writable.getWriter();
+    try {
+      let offset = 0; const entries = [];
+      for (const file of files) {
+        const object = await env.PHOTOS.get(file.key);
+        if (!object) throw new Error(`Missing object ${file.key}`);
+        const header = zipLocalHeader(file.name, stamp); await writer.write(header);
+        const start = offset; offset += header.length;
+        let crc = 0, size = 0;
+        const body = object.body instanceof ReadableStream ? object.body : new Response(object.body).body;
+        const reader = body.getReader();
+        for (;;) { const { value, done } = await reader.read(); if (done) break; crc = crc32(crc, value); size += value.length; await writer.write(value); }
+        const descriptor = zipDescriptor(crc >>> 0, size); await writer.write(descriptor); offset += size + descriptor.length;
+        entries.push({ name: file.name, crc: crc >>> 0, size, offset: start });
+      }
+      const cdOffset = offset; let cdSize = 0;
+      for (const entry of entries) { const record = zipCentralEntry(entry, stamp); cdSize += record.length; await writer.write(record); }
+      await writer.write(zipEnd(entries.length, cdSize, cdOffset));
+      await writer.close();
+    } catch (err) { onError?.(err); await writer.abort(err).catch(() => {}); }
+  })();
+  return { readable, pump };
+}
+async function sessionSummary(env, sessionId) {
+  const session = await env.DB.prepare('SELECT title, session_date AS date, location FROM sessions WHERE id = ?').bind(sessionId).first();
+  return session ? { title: session.title, date: session.date, location: session.location } : null;
+}
+// A shared crew password with unlimited attempts is brute-forceable; count failures per IP in D1
+// (migration 0008). If that table is missing the check is skipped rather than locking the crew out.
+const LOGIN_WINDOW_MINUTES = 15, LOGIN_MAX_FAILURES = 5;
+async function loginThrottle(request, env) {
+  const ip = request.headers.get('cf-connecting-ip') || 'unknown';
+  const check = async () => {
+    try {
+      const row = await env.DB.prepare('SELECT count, window_start FROM login_attempts WHERE ip = ?').bind(ip).first();
+      if (!row) return 0;
+      const started = Date.parse(`${row.window_start}Z`) || Date.parse(row.window_start) || 0;
+      if (Date.now() - started > LOGIN_WINDOW_MINUTES * 60_000) return 0;
+      return Number(row.count) || 0;
+    } catch { return 0; }
+  };
+  return {
+    blocked: (await check()) >= LOGIN_MAX_FAILURES,
+    async failed() {
+      try {
+        await env.DB.prepare(`INSERT INTO login_attempts (ip, count, window_start) VALUES (?, 1, CURRENT_TIMESTAMP)
+          ON CONFLICT(ip) DO UPDATE SET count = CASE WHEN (julianday(CURRENT_TIMESTAMP) - julianday(window_start)) * 1440 > ? THEN 1 ELSE count + 1 END,
+            window_start = CASE WHEN (julianday(CURRENT_TIMESTAMP) - julianday(window_start)) * 1440 > ? THEN CURRENT_TIMESTAMP ELSE window_start END`)
+          .bind(ip, LOGIN_WINDOW_MINUTES, LOGIN_WINDOW_MINUTES).run();
+      } catch { /* Table not migrated yet — login still works, just without throttling. */ }
+    },
+    async succeeded() { try { await env.DB.prepare('DELETE FROM login_attempts WHERE ip = ?').bind(ip).run(); } catch { /* optional */ } },
+  };
 }
 function cashfreeBase(env) {
   return env.CASHFREE_ENV === 'production' ? 'https://api.cashfree.com/pg' : 'https://sandbox.cashfree.com/pg';
@@ -494,6 +605,28 @@ async function generateFallbackLinks(env, targetSessionId = null) {
   return linkResults.reduce((sum, result) => sum + Number(result.meta?.changes || 0), 0);
 }
 
+// GET /api/health — public, unauthenticated probe for the admin studio's topbar health pill and any
+// uptime monitor. Each check is isolated so one failure never masks another, and only
+// 'ok' / 'error' / 'skipped' ever leaves the Worker: no error text, no binding or env details.
+const HEALTH_FACE_TIMEOUT_MS = 3000;
+async function healthCheck(env, deep) {
+  const probe = async (name, run) => {
+    try { await run(); return 'ok'; }
+    // Log one line per failed check for Worker logs; stack traces stay out (and nothing reaches the client).
+    catch (caught) { console.error('health check failed:', name, caught?.message ?? String(caught)); return 'error'; }
+  };
+  const [db, r2, face] = await Promise.all([
+    probe('db', async () => { if (!env.DB) throw new Error('DB binding missing'); await env.DB.prepare('SELECT 1').first(); }),
+    // A missing object is a healthy answer from R2; only a thrown error means the bucket is unreachable.
+    probe('r2', async () => { if (!env.PHOTOS) throw new Error('PHOTOS binding missing'); await env.PHOTOS.head('__health-probe'); }),
+    // The face service is only pinged on demand (?deep=1) so a routine poll never waits on a cold
+    // Hugging Face Space. Any HTTP reply — even 405 for HEAD — proves it is reachable.
+    deep ? probe('face', async () => { if (!env.FACE_API_URL) throw new Error('FACE_API_URL missing'); await fetch(env.FACE_API_URL, { method: 'HEAD', signal: AbortSignal.timeout(HEALTH_FACE_TIMEOUT_MS) }); }) : 'skipped',
+  ]);
+  const checks = { db, r2, face };
+  return { ok: Object.values(checks).every(status => status !== 'error'), checks };
+}
+
 // Named export solely for direct unit testing of the pure grouping logic; the Cloudflare Workers
 // runtime only uses the default export below.
 export { burstGroups };
@@ -506,16 +639,36 @@ export default {
       if (request.method === 'OPTIONS') return new Response(null, { headers: cors(request, env) });
       if (!url.pathname.startsWith('/api/')) return error('Not found', request, env, 404);
 
+      if (request.method === 'GET' && url.pathname === '/api/health') {
+        const health = await healthCheck(env, url.searchParams.get('deep') === '1');
+        return response({ ...health, time: new Date().toISOString() }, request, env, health.ok ? 200 : 503);
+      }
+
       if (request.method === 'POST' && url.pathname === '/api/admin/login') {
         const { password } = await readJson(request);
-        if (!env.ADMIN_PASSWORD || !same(password, env.ADMIN_PASSWORD)) return error('Incorrect password.', request, env, 401);
+        const throttle = env.DB ? await loginThrottle(request, env) : null;
+        if (throttle?.blocked) return json({ error: `Too many sign-in attempts. Try again in ${LOGIN_WINDOW_MINUTES} minutes.` }, 429, { ...cors(request, env), 'retry-after': String(LOGIN_WINDOW_MINUTES * 60) });
+        if (!env.ADMIN_PASSWORD || !same(password, env.ADMIN_PASSWORD)) { await throttle?.failed(); return error('Incorrect password.', request, env, 401); }
+        await throttle?.succeeded();
         const token = await sign({ role: 'admin', exp: Date.now() + 8 * 60 * 60_000 }, env);
         return response({ token }, request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/sessions') {
-        const sessions = await env.DB.prepare("SELECT id, title, session_date, location, price_paise, currency FROM sessions WHERE status = 'published' ORDER BY session_date DESC LIMIT 30").all();
-        return response({ sessions: sessions.results }, request, env);
+        // Session photos are only ever shown to the guest who matched them — the landing-page card
+        // uses a cover the crew explicitly chose (migration 0009), otherwise the brand illustration.
+        const hasCover = await hasColumn(env, 'sessions', 'cover_photo_id');
+        const sessions = await env.DB.prepare(`SELECT id, title, session_date, location, price_paise, currency${hasCover ? ', cover_photo_id' : ''} FROM sessions WHERE status = 'published' ORDER BY session_date DESC LIMIT 30`).all();
+        const thumbs = await thumbColumn(env);
+        const results = await Promise.all(sessions.results.map(async ({ cover_photo_id: coverId, ...session }) => {
+          let coverUrl = null;
+          try {
+            const cover = coverId ? await env.DB.prepare(`SELECT id${thumbs} FROM photos WHERE id = ? AND session_id = ?`).bind(coverId, session.id).first() : null;
+            if (cover) coverUrl = `${url.origin}/api/media/${cover.id}?variant=${cover.thumb_key ? 'thumb' : 'preview'}&token=${encodeURIComponent(await mediaToken(cover.id, cover.thumb_key ? 'thumb' : 'preview', env, 6 * 60))}`;
+          } catch { coverUrl = null; }
+          return { ...session, coverUrl };
+        }));
+        return response({ sessions: results }, request, env);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/match') {
@@ -525,7 +678,8 @@ export default {
         const file = form.get('file');
         if (typeof sessionId !== 'string' || !sessionId || !(file instanceof File)) return error('A valid selfie image and session are required.', request, env);
         if (form.get('consent') !== 'true') return error('Your consent is required for face matching.', request, env);
-        if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || !file.size || file.size > 10 * 1024 * 1024) return error('Choose a JPG, PNG or WebP selfie smaller than 10 MB.', request, env, 413);
+        if (!file.size || file.size > 10 * 1024 * 1024) return error('Choose a JPG, PNG or WebP selfie smaller than 10 MB.', request, env, 413);
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) return error('Choose a JPG, PNG or WebP selfie smaller than 10 MB.', request, env, 400);
         const session = await env.DB.prepare("SELECT * FROM sessions WHERE id = ? AND status = 'published'").bind(sessionId).first();
         if (!session) return error('That session is unavailable.', request, env, 404);
         const statusCheck = await env.DB.prepare(`
@@ -592,9 +746,14 @@ export default {
         await env.DB.prepare('INSERT INTO searches (id, session_id, matched_photo_ids_json, price_paise, currency, expires_at) VALUES (?, ?, ?, ?, ?, ?)')
           .bind(searchId, sessionId, JSON.stringify(photoIds), session.price_paise, session.currency, dateAfterMinutes(45)).run();
         const base = url.origin;
+        let thumbKeys = new Map();
+        if (photoIds.length && await hasColumn(env, 'photos', 'thumb_key')) {
+          try { const rows = await env.DB.prepare(`SELECT id, thumb_key FROM photos WHERE id IN (${photoIds.map(() => '?').join(',')})`).bind(...photoIds).all(); thumbKeys = new Map(rows.results.map(row => [row.id, row.thumb_key])); }
+          catch { thumbKeys = new Map(); }
+        }
         const previews = await Promise.all(matches.map(async ([photoId, score]) => ({
           photoId, score: Math.round(score * 100),
-          url: `${base}/api/media/${photoId}?variant=preview&token=${encodeURIComponent(await mediaToken(photoId, 'preview', env))}`,
+          ...(await previewLinks(base, { id: photoId, thumb_key: thumbKeys.get(photoId) }, env)),
         })));
         const token = await sign({ scope: 'search', searchId, exp: Date.now() + 45 * 60_000 }, env);
 
@@ -649,11 +808,24 @@ export default {
         const photoId = media[1]; const variant = url.searchParams.get('variant'); const token = url.searchParams.get('token');
         const payload = await verify(token, env);
         if (payload?.scope !== 'media' || payload.photoId !== photoId || payload.variant !== variant) return error('This photo link has expired.', request, env, 401);
-        const photo = await env.DB.prepare('SELECT object_key, preview_key, content_type FROM photos WHERE id = ?').bind(photoId).first();
+        const photo = await env.DB.prepare(`SELECT object_key, preview_key, content_type, filename${await thumbColumn(env)} FROM photos WHERE id = ?`).bind(photoId).first();
         if (!photo) return error('Photo not found.', request, env, 404);
-        const object = await env.PHOTOS.get(variant === 'original' ? photo.object_key : photo.preview_key);
+        const key = variant === 'original' ? photo.object_key : (variant === 'thumb' && photo.thumb_key) ? photo.thumb_key : photo.preview_key;
+        const object = await env.PHOTOS.get(key);
         if (!object) return error('Photo unavailable.', request, env, 404);
-        return new Response(object.body, { headers: { ...cors(request, env), 'content-type': object.httpMetadata?.contentType || photo.content_type, 'cache-control': 'private, max-age=600' } });
+        const headers = { ...cors(request, env), 'content-type': object.httpMetadata?.contentType || photo.content_type, 'cache-control': 'private, max-age=600' };
+        // ?download=1 makes the browser save the original under its session filename instead of opening it.
+        if (variant === 'original' && url.searchParams.get('download') === '1') headers['content-disposition'] = `attachment; filename="${safeFilename(photo.filename)}"`;
+        return new Response(object.body, { headers });
+      }
+
+      // Fresh preview links for a still-valid search (the signed URLs expire; the search may not have yet).
+      if (request.method === 'GET' && url.pathname.match(/^\/api\/searches\/([\w-]+)\/previews$/)) {
+        const searchId = url.pathname.split('/')[3];
+        if (!await requireSearch(request, env, searchId)) return error('This gallery link has expired.', request, env, 401);
+        const search = await env.DB.prepare("SELECT * FROM searches WHERE id = ? AND (status = 'paid' OR expires_at > CURRENT_TIMESTAMP)").bind(searchId).first();
+        if (!search) return error('This gallery link has expired.', request, env, 410);
+        return response({ photos: await previewPayload(search, request, env), session: await sessionSummary(env, search.session_id) }, request, env);
       }
 
       if (request.method === 'GET' && url.pathname.match(/^\/api\/searches\/([\w-]+)\/access$/)) {
@@ -661,7 +833,37 @@ export default {
         if (!await requireSearch(request, env, searchId)) return error('This gallery link has expired.', request, env, 401);
         const search = await env.DB.prepare("SELECT * FROM searches WHERE id = ? AND status = 'paid'").bind(searchId).first();
         if (!search) return error('Payment has not been confirmed.', request, env, 402);
-        return response({ unlocked: true, photos: await accessPayload(search, request, env) }, request, env);
+        // A paid gallery gets a 30-day token so the guest can come back for their originals.
+        const galleryToken = await sign({ scope: 'search', searchId, exp: Date.now() + 30 * 24 * 60 * 60_000 }, env);
+        return response({ unlocked: true, photos: await accessPayload(search, request, env), galleryToken, session: await sessionSummary(env, search.session_id) }, request, env);
+      }
+
+      // GET /api/searches/:id/download — every original of a paid search as one ZIP, streamed.
+      if (request.method === 'GET' && url.pathname.match(/^\/api\/searches\/([\w-]+)\/download$/)) {
+        const searchId = url.pathname.split('/')[3];
+        if (!await requireSearch(request, env, searchId)) return error('This gallery link has expired.', request, env, 401);
+        const search = await env.DB.prepare("SELECT * FROM searches WHERE id = ? AND status = 'paid'").bind(searchId).first();
+        if (!search) return error('Payment has not been confirmed.', request, env, 402);
+        const photoIds = JSON.parse(search.matched_photo_ids_json);
+        if (!photoIds.length) return error('There are no photos in this pack.', request, env, 404);
+        const rows = await env.DB.prepare(`SELECT id, object_key, filename FROM photos WHERE session_id = ? AND id IN (${photoIds.map(() => '?').join(',')}) ORDER BY filename`).bind(search.session_id, ...photoIds).all();
+        if (!rows.results.length) return error('There are no photos in this pack.', request, env, 404);
+        // Session filenames can repeat once "keep both" copies exist; suffix so the archive never overwrites itself.
+        const seen = new Map(); const encoder = new TextEncoder();
+        const files = rows.results.map(row => {
+          const base = safeFilename(row.filename); const count = (seen.get(base) || 0) + 1; seen.set(base, count);
+          const name = count === 1 ? base : base.replace(/(\.[^.]*)?$/, `-${count}$1`);
+          return { key: row.object_key, name: encoder.encode(name) };
+        });
+        // Sizes are optional (older R2 mocks/objects may not answer head); when known, refuse ZIP64 territory and send an exact length.
+        const heads = await Promise.all(files.map(file => env.PHOTOS.head?.(file.key).catch(() => null) ?? null));
+        const sized = heads.every(head => Number.isFinite(head?.size));
+        if (sized) { heads.forEach((head, index) => { files[index].size = head.size; }); if (zipLength(files) >= 2 ** 32) return error('This pack is too large for one download. Use the per-photo Download links.', request, env, 413); }
+        const session = await sessionSummary(env, search.session_id);
+        const archiveName = `surfers-of-india-${session?.date || 'session'}-${(session?.location || 'photos').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}.zip`;
+        const { readable, pump } = zipStream(files, env, err => console.error('zip stream failed', searchId, err?.message));
+        ctx?.waitUntil?.(pump);
+        return new Response(readable, { headers: { ...cors(request, env), 'content-type': 'application/zip', 'content-disposition': `attachment; filename="${archiveName}"`, 'cache-control': 'no-store', ...(sized ? { 'content-length': String(zipLength(files)) } : {}) } });
       }
 
       if (request.method === 'POST' && url.pathname === '/api/admin/sessions') {
@@ -700,11 +902,11 @@ export default {
         const sessionId = deleteSession[1];
 
         // Fetch all photos for this session
-        const photos = await env.DB.prepare('SELECT object_key, preview_key FROM photos WHERE session_id = ?').bind(sessionId).all();
+        const photos = await env.DB.prepare(`SELECT object_key, preview_key${await thumbColumn(env)} FROM photos WHERE session_id = ?`).bind(sessionId).all();
 
         // Delete all photo files from R2
         if (photos.results.length > 0) {
-          const keysToDelete = photos.results.flatMap(p => [p.object_key, p.preview_key]);
+          const keysToDelete = photos.results.flatMap(p => [p.object_key, p.preview_key, p.thumb_key].filter(Boolean));
           const chunks = [];
           for (let i = 0; i < keysToDelete.length; i += 500) {
             chunks.push(env.PHOTOS.delete(keysToDelete.slice(i, i + 500)));
@@ -730,8 +932,10 @@ export default {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
         const sessionId = sessionPhotos[1];
         const base = url.origin;
+        let coverPhotoId = null;
+        if (await hasColumn(env, 'sessions', 'cover_photo_id')) { try { coverPhotoId = (await env.DB.prepare('SELECT cover_photo_id FROM sessions WHERE id = ?').bind(sessionId).first())?.cover_photo_id || null; } catch { coverPhotoId = null; } }
         const photos = await env.DB.prepare(`
-          SELECT p.id, p.filename, p.indexing_status, p.created_at, j.error as indexing_error, COUNT(f.id) as face_count
+          SELECT p.id, p.filename, p.indexing_status, p.created_at, j.error as indexing_error, COUNT(f.id) as face_count${(await thumbColumn(env)).replace(', thumb_key', ', p.thumb_key')}
           FROM photos p
           LEFT JOIN faces f ON f.photo_id = p.id
           LEFT JOIN indexing_jobs j ON j.photo_id = p.id
@@ -742,11 +946,12 @@ export default {
 
         const results = await Promise.all(photos.results.map(async (photo) => ({
           ...photo,
-          previewUrl: `${base}/api/media/${photo.id}?variant=preview&token=${encodeURIComponent(await mediaToken(photo.id, 'preview', env))}`,
-          originalUrl: `${base}/api/media/${photo.id}?variant=original&token=${encodeURIComponent(await mediaToken(photo.id, 'original', env))}`,
+          previewUrl: await mediaLink(base, photo.id, 'preview', env),
+          thumbUrl: photo.thumb_key ? await mediaLink(base, photo.id, 'thumb', env) : null,
+          originalUrl: await mediaLink(base, photo.id, 'original', env),
         })));
 
-        return response({ photos: results }, request, env);
+        return response({ photos: results, coverPhotoId }, request, env);
       }
 
       // DELETE /api/admin/photos/:id - Delete a single photo
@@ -754,13 +959,10 @@ export default {
       if (request.method === 'DELETE' && deletePhoto) {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
         const photoId = deletePhoto[1];
-        const photo = await env.DB.prepare('SELECT object_key, preview_key FROM photos WHERE id = ?').bind(photoId).first();
+        const photo = await env.DB.prepare(`SELECT object_key, preview_key${await thumbColumn(env)} FROM photos WHERE id = ?`).bind(photoId).first();
         if (!photo) return error('Photo not found.', request, env, 404);
 
-        await Promise.all([
-          env.PHOTOS.delete(photo.object_key),
-          env.PHOTOS.delete(photo.preview_key),
-        ]);
+        await Promise.all([photo.object_key, photo.preview_key, photo.thumb_key].filter(Boolean).map(key => env.PHOTOS.delete(key)));
 
         await env.DB.batch([
           env.DB.prepare('DELETE FROM faces WHERE photo_id = ?').bind(photoId),
@@ -775,7 +977,8 @@ export default {
       if (request.method === 'POST' && reindexSession) {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
         const sessionId = reindexSession[1];
-        const photos = await env.DB.prepare("SELECT id, object_key FROM photos WHERE session_id = ?").bind(sessionId).all();
+        const onlyFailed = url.searchParams.get('onlyFailed') === '1';
+        const photos = await env.DB.prepare(`SELECT id, object_key FROM photos WHERE session_id = ?${onlyFailed ? " AND indexing_status = 'failed'" : ''}`).bind(sessionId).all();
         const session = await env.DB.prepare('SELECT id FROM sessions WHERE id = ?').bind(sessionId).first();
         if (!session) return error('Session not found.', request, env, 404);
         return response(await enqueuePhotos(photos.results, env), request, env, 202);
@@ -786,10 +989,19 @@ export default {
       if (request.method === 'PUT' && updateSession) {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
         const sessionId = updateSession[1];
-        const { title, date, location, pricePaise, status } = await readJson(request);
+        const { title, date, location, pricePaise, status, coverPhotoId } = await readJson(request);
         validateSession({ title, date, location, pricePaise, status }, true);
         const existing = await env.DB.prepare('SELECT id FROM sessions WHERE id = ?').bind(sessionId).first();
         if (!existing) return error('Session not found.', request, env, 404);
+        if (coverPhotoId !== undefined) {
+          if (!await hasColumn(env, 'sessions', 'cover_photo_id')) return error('Session covers need database migration 0009.', request, env, 503);
+          if (coverPhotoId !== null && (typeof coverPhotoId !== 'string' || !coverPhotoId)) return error('Choose a valid cover photo.', request, env);
+          if (coverPhotoId) {
+            const owned = await env.DB.prepare('SELECT id FROM photos WHERE id = ? AND session_id = ?').bind(coverPhotoId, sessionId).first();
+            if (!owned) return error('That photo is not part of this session.', request, env, 404);
+          }
+          await env.DB.prepare('UPDATE sessions SET cover_photo_id = ? WHERE id = ?').bind(coverPhotoId, sessionId).run();
+        }
         if (status === 'published') {
           const count = await env.DB.prepare('SELECT COUNT(*) AS count FROM photos WHERE session_id = ?').bind(sessionId).first();
           if (!count?.count) return error('Upload at least one photo before publishing.', request, env);
@@ -1016,6 +1228,23 @@ export default {
         if (onDuplicate !== null && !DUPLICATE_MODES.includes(onDuplicate)) return error('Choose replace, skip or rename for duplicate photos.', request, env);
         const { preview, original } = await readFramedUpload(request, 5 * 1024 * 1024);
         return storeSessionPhoto(env, request, sessionId, { filename: url.searchParams.get('filename') || 'photo.jpg', contentType: type, original, preview, onDuplicate });
+      }
+
+      // POST /api/admin/photos/:id/thumb — a small watermarked JPEG for grid tiles, sent by the crew
+      // studio after the main upload. Optional: everything renders from the preview without it.
+      const thumbUpload = url.pathname.match(/^\/api\/admin\/photos\/([\w-]+)\/thumb$/);
+      if (request.method === 'POST' && thumbUpload) {
+        if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
+        if (!await hasColumn(env, 'photos', 'thumb_key')) return error('Thumbnails need database migration 0008.', request, env, 503);
+        const photo = await env.DB.prepare('SELECT id, session_id, thumb_key FROM photos WHERE id = ?').bind(thumbUpload[1]).first();
+        if (!photo) return error('Photo not found.', request, env, 404);
+        const body = await boundedBody(request, 1024 * 1024);
+        const head = new Uint8Array(await body.slice(0, 2).arrayBuffer());
+        if (!body.size || head[0] !== 0xFF || head[1] !== 0xD8) return error('The thumbnail must be a JPEG.', request, env, 400);
+        const thumbKey = `sessions/${photo.session_id}/thumb/${photo.id}.jpg`;
+        await env.PHOTOS.put(thumbKey, body, { httpMetadata: { contentType: 'image/jpeg' } });
+        await env.DB.prepare('UPDATE photos SET thumb_key = ? WHERE id = ?').bind(thumbKey, photo.id).run();
+        return response({ photoId: photo.id, thumb: true }, request, env, 201);
       }
 
       const publish = url.pathname.match(/^\/api\/admin\/sessions\/([\w-]+)\/publish$/);

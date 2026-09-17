@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   currency TEXT NOT NULL DEFAULT 'INR',
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  published_at TEXT
+  published_at TEXT,
+  cover_photo_id TEXT REFERENCES photos(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS photos (
@@ -19,6 +20,7 @@ CREATE TABLE IF NOT EXISTS photos (
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   object_key TEXT NOT NULL UNIQUE,
   preview_key TEXT NOT NULL UNIQUE,
+  thumb_key TEXT,
   filename TEXT NOT NULL,
   content_type TEXT NOT NULL,
   indexing_status TEXT NOT NULL DEFAULT 'pending' CHECK (indexing_status IN ('pending', 'completed', 'failed')),
@@ -142,3 +144,10 @@ CREATE TABLE IF NOT EXISTS indexing_jobs (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS indexing_jobs_status ON indexing_jobs(status);
+
+-- Crew login throttling (per source IP, 15-minute window).
+CREATE TABLE IF NOT EXISTS login_attempts (
+  ip TEXT PRIMARY KEY,
+  count INTEGER NOT NULL DEFAULT 0,
+  window_start TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

@@ -4,4 +4,17 @@
   <FilesMatch "\.(html|js|css)$">
     Header set Cache-Control "no-cache, must-revalidate"
   </FilesMatch>
+  # Security headers. vercel.json sets the same set for the Vercel mirror; Hostinger
+  # (the primary host) only sees this file.
+  Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+  Header always set X-Frame-Options "DENY"
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set Referrer-Policy "no-referrer"
+  Header always set Permissions-Policy "camera=(self), microphone=(), geolocation=()"
+  # Content Security Policy — REPORT-ONLY. Browsers log violations to the console but block
+  # nothing, so the Cashfree checkout cannot break. Watch the browser console for CSP violation
+  # reports through one full sandbox payment (open checkout, pay, return, download an original);
+  # once a complete run logs none, rename this header to Content-Security-Policy to enforce it.
+  # vercel.json carries the identical policy for the Vercel mirror.
+  Header always set Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' https://sdk.cashfree.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' blob: data: https://mambo-jambo-photo-api.surfersofindia.workers.dev; connect-src 'self' https://mambo-jambo-photo-api.surfersofindia.workers.dev https://sdk.cashfree.com https://api.cashfree.com https://sandbox.cashfree.com; frame-src https://*.cashfree.com https://sdk.cashfree.com; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 </IfModule>
