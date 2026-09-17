@@ -221,7 +221,7 @@ test('appearance links surface a faceless photo whose clothing matches a photo w
   assert.equal(data.queue[0].linkType, 'appearance');
   assert.deepEqual([data.queue[0].photo1.id, data.queue[0].photo2.id].sort(), ['faceless', 'photo']);
 });
-test('burst links surface a faceless photo next to its confirmed neighbor, skip pairs direct matching already covers, and are idempotent to confirm', async context => {
+test('burst links auto-confirm on generation, skip pairs direct matching already covers, and never enter the review queue', async context => {
   const { env, sql, token } = await setup(context);
   sql.exec(`
     UPDATE photos SET indexing_status='completed' WHERE id='photo';
@@ -241,18 +241,75 @@ test('burst links surface a faceless photo next to its confirmed neighbor, skip 
   // direct match); lonelyE/F sit far apart in time from anything, so neither is a burst at all.
   const send = (path, body) => worker.fetch(new Request(`https://api.test${path}`, { method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${token}` }, ...(body ? { body: JSON.stringify(body) } : {}) }), env, {});
   assert.equal((await (await send('/api/admin/link-queue/scan', {})).json()).generated, 1);
+
+  // Burst links skip crew review entirely — the row lands 'confirmed' as soon as it's generated.
+  const row = sql.prepare("SELECT id, status, photo1_id, photo2_id FROM photo_links WHERE link_type='burst'").get();
+  assert.equal(row.status, 'confirmed');
+  assert.deepEqual([row.photo1_id, row.photo2_id].sort(), ['burstA', 'burstB']);
+
   const response = await send('/api/admin/link-queue'); assert.equal(response.status, 200);
   const data = await response.json();
-  assert.equal(data.queue.length, 1);
-  assert.equal(data.queue[0].linkType, 'burst');
-  assert.deepEqual([data.queue[0].photo1.id, data.queue[0].photo2.id].sort(), ['burstA', 'burstB']);
-  assert.ok(data.queue.every(pair => new URL(pair.photo1.url).searchParams.get('variant') === 'original'));
-  assert.equal(data.stats.pending, 1);
+  assert.equal(data.queue.length, 0);
+  assert.equal(data.stats.pending, 0);
+  assert.equal(data.stats.confirmed, 1);
 
-  const linkId = data.queue[0].id;
-  assert.equal((await send('/api/admin/confirm-link', { linkId, confirmed: 'false' })).status, 400);
-  assert.equal((await send('/api/admin/confirm-link', { linkId, confirmed: true })).status, 200);
-  assert.equal(sql.prepare('SELECT status FROM photo_links WHERE id=?').get(linkId).status, 'confirmed');
-  assert.equal((await send('/api/admin/confirm-link', { linkId, confirmed: false })).status, 409);
+  // Already confirmed automatically, so confirm-link can no longer act on it — but it still
+  // validates the request shape before touching the row.
+  assert.equal((await send('/api/admin/confirm-link', { linkId: row.id, confirmed: 'false' })).status, 400);
+  assert.equal((await send('/api/admin/confirm-link', { linkId: row.id, confirmed: true })).status, 409);
   assert.equal((await (await send('/api/admin/link-queue/scan', {})).json()).generated, 0);
+});
+test('a burst link left over as pending from before auto-confirm sweeps to confirmed on queue fetch', async context => {
+  const { env, sql, token } = await setup(context);
+  sql.exec(`
+    INSERT INTO photos(id,session_id,object_key,preview_key,filename,content_type,indexing_status) VALUES
+      ('legacyA','session','oA','vA','legacyA.jpg','image/jpeg','completed'),
+      ('legacyB','session','oB','vB','legacyB.jpg','image/jpeg','completed');
+    INSERT INTO photo_links(id,session_id,photo1_id,photo2_id,link_type,score,status) VALUES
+      ('legacy-link','session','legacyA','legacyB','burst',0.9,'pending');
+  `);
+  const send = path => worker.fetch(new Request(`https://api.test${path}`, { headers: { Authorization: `Bearer ${token}` } }), env, {});
+  const data = await (await send('/api/admin/link-queue')).json();
+  assert.equal(data.queue.length, 0);
+  assert.equal(sql.prepare("SELECT status FROM photo_links WHERE id='legacy-link'").get().status, 'confirmed');
+});
+
+// ── Quotas and revocable crew tokens against a real SQLite schema (migrations 0010 / 0011) ──
+// The Worker suite mocks the D1 rows; these prove the SQL itself: the upsert's window arithmetic,
+// the sweep's text comparison and the admin_sessions round trip.
+test('the search quota upsert counts within a window, resets once the window has passed, and sweeps stale rows', async context => {
+  const { env, sql } = await setup(context);
+  sql.exec("UPDATE sessions SET status='published'; UPDATE photos SET indexing_status='completed'; INSERT INTO faces(id,photo_id,embedding_json) VALUES('f','photo','[1,0]')");
+  context.mock.method(globalThis, 'fetch', async () => Response.json({ faces: [{ embedding: [1, 0] }] }));
+  const search = () => {
+    const form = new FormData(); form.append('sessionId', 'session'); form.append('consent', 'true'); form.append('file', new Blob(['selfie'], { type: 'image/jpeg' }), 'selfie.jpg');
+    return worker.fetch(new Request('https://api.test/api/match', { method: 'POST', headers: { 'cf-connecting-ip': '198.51.100.1' }, body: form }), env, {});
+  };
+  for (let i = 0; i < 8; i++) assert.equal((await search()).status, 200);
+  const blocked = await search(); assert.equal(blocked.status, 429);
+  const retry = Number(blocked.headers.get('retry-after')); assert.ok(retry > 0 && retry <= 600, `retry-after ${retry}`);
+  assert.deepEqual(sql.prepare('SELECT key, count FROM rate_limits ORDER BY key').all().map(row => ({ ...row })), [{ key: 'match:10m:198.51.100.1', count: 9 }, { key: 'match:1d:198.51.100.1', count: 9 }]);
+  // Age the ten-minute window past its end: the next search opens a fresh window and is allowed,
+  // while the untouched daily window keeps counting.
+  sql.exec("UPDATE rate_limits SET window_start = datetime('now', '-11 minutes') WHERE key LIKE 'match:10m:%'");
+  assert.equal((await search()).status, 200);
+  assert.equal(sql.prepare("SELECT count FROM rate_limits WHERE key = 'match:10m:198.51.100.1'").get().count, 1);
+  assert.equal(sql.prepare("SELECT count FROM rate_limits WHERE key = 'match:1d:198.51.100.1'").get().count, 10);
+  // Rows older than the longest window are swept by the next search.
+  sql.exec("INSERT INTO rate_limits(key,count,window_start) VALUES('match:10m:stale', 3, datetime('now', '-2 days'))");
+  assert.equal((await search()).status, 200);
+  assert.equal(sql.prepare("SELECT COUNT(*) AS n FROM rate_limits WHERE key = 'match:10m:stale'").get().n, 0);
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM searches').get().n, 10, 'refused searches never create a search record');
+});
+test('crew sign-in records an admin_sessions row, requests touch last_seen_at, and sign-out revokes it', async context => {
+  const { env, sql, token } = await setup(context);
+  const row = sql.prepare('SELECT * FROM admin_sessions').get();
+  assert.ok(row?.expires_at && !row.revoked_at && !row.last_seen_at);
+  const dashboard = () => worker.fetch(new Request('https://api.test/api/admin/dashboard', { headers: { Authorization: `Bearer ${token}` } }), env, {});
+  assert.equal((await dashboard()).status, 200);
+  assert.ok(sql.prepare('SELECT last_seen_at FROM admin_sessions').get().last_seen_at);
+  const logout = await worker.fetch(new Request('https://api.test/api/admin/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } }), env, {});
+  assert.equal(logout.status, 200); assert.deepEqual(await logout.json(), { ok: true });
+  assert.ok(sql.prepare('SELECT revoked_at FROM admin_sessions').get().revoked_at);
+  assert.equal((await dashboard()).status, 401);
 });

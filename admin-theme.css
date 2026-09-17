@@ -279,6 +279,8 @@ kbd{padding:2px 6px;border:1px solid var(--soi-sand-deep);border-bottom-width:2p
 
 /* ── Review queues: face pairs, burst & appearance links ──────────────── */
 .verify-grid{display:grid;grid-template-columns:1fr;gap:25px}
+/* Queue is server-sorted by session; this marks where one session's run of cards starts. */
+.review-session-divider{padding-bottom:10px;border-bottom:1px solid var(--soi-sand);font:600 11px var(--mono);letter-spacing:1.5px;text-transform:uppercase;color:var(--soi-ochre)}
 .verify-card{display:flex;flex-direction:column;gap:16px;padding:28px;background:var(--soi-surface);border:1px solid var(--soi-sand);border-radius:var(--radius-organic);box-shadow:var(--shadow-card);transition:box-shadow var(--duration-base)}
 .verify-card.is-active{outline:2px solid var(--soi-terracotta);outline-offset:4px} /* the card Y / N / S will act on */
 .review-heading{display:flex;justify-content:space-between;align-items:center;gap:20px}

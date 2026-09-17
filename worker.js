@@ -600,8 +600,11 @@ async function generateFallbackLinks(env, targetSessionId = null) {
   }
 
   candidates.sort((a, b) => b.score - a.score);
+  // Burst pairs (same subject, seconds apart) are trusted without a human look — they still pass
+  // the face-mismatch and gap checks above, they just skip the review queue. Appearance ("same
+  // kit") links are a weaker signal and still land 'pending' for crew confirmation.
   const statements = candidates.slice(0, 20).map(pair => env.DB.prepare(`INSERT OR IGNORE INTO photo_links
-    (id, session_id, photo1_id, photo2_id, link_type, score, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')`).bind(id(), pair.sessionId, pair.first, pair.second, pair.linkType, pair.score));
+    (id, session_id, photo1_id, photo2_id, link_type, score, status) VALUES (?, ?, ?, ?, ?, ?, ?)`).bind(id(), pair.sessionId, pair.first, pair.second, pair.linkType, pair.score, pair.linkType === 'burst' ? 'confirmed' : 'pending'));
   if (!statements.length) return 0;
   const linkResults = await env.DB.batch(statements);
   return linkResults.reduce((sum, result) => sum + Number(result.meta?.changes || 0), 0);
@@ -720,10 +723,11 @@ export default {
         const threshold = Number(env.MATCH_THRESHOLD || 0.62);
         let matches = [...scores.entries()].filter(([, score]) => score >= threshold).sort((a, b) => b[1] - a[1]).slice(0, 80);
 
-        // Crew-confirmed burst/appearance links extend a direct match to its linked photo even
-        // when that photo has no usable face of its own — but only once a human has confirmed the
-        // pairing (pending/rejected links never reach a guest). The linked photo's own score never
-        // gates inclusion here since the pairing is already human-verified ground truth.
+        // Confirmed burst/appearance links extend a direct match to its linked photo even when
+        // that photo has no usable face of its own — burst links confirm automatically (same
+        // subject, seconds apart); appearance ("same kit") links need a crew call first. Either
+        // way, pending/rejected links never reach a guest. The linked photo's own score never
+        // gates inclusion here since the pairing is already confirmed ground truth.
         const matchedIds = new Set(matches.map(([photoId]) => photoId));
         if (matchedIds.size) {
           const idList = [...matchedIds];
@@ -1049,7 +1053,7 @@ export default {
           JOIN photos p2 ON p2.id = f2.photo_id
           WHERE fv.status = 'pending' AND f1.bbox_json IS NOT NULL AND f2.bbox_json IS NOT NULL
             AND p1.indexing_status = 'completed' AND p2.indexing_status = 'completed'
-          ORDER BY fv.similarity DESC
+          ORDER BY s.title ASC, fv.similarity DESC
         `;
         let res = await env.DB.prepare(query).all();
         let reviewable = res.results.filter(item => faceBounds(item.face1_bbox) && faceBounds(item.face2_bbox));
@@ -1120,6 +1124,11 @@ export default {
         if (!await requireAdmin(request, env)) return error('Sign in required.', request, env, 401);
         const base = url.origin;
 
+        // Burst links (same subject, shot seconds apart) auto-confirm at generation time now — this
+        // sweeps any left over from before that change, or from a deploy race, so they never sit in
+        // the queue waiting on a human. Appearance ("same kit") links still need a crew call.
+        await env.DB.prepare(`UPDATE photo_links SET status = 'confirmed', updated_at = CURRENT_TIMESTAMP WHERE link_type = 'burst' AND status = 'pending'`).run();
+
         const query = `
           SELECT
             pl.id, pl.link_type, pl.score, s.title as session_title,
@@ -1130,7 +1139,7 @@ export default {
           JOIN photos p1 ON p1.id = pl.photo1_id
           JOIN photos p2 ON p2.id = pl.photo2_id
           WHERE pl.status = 'pending' AND p1.indexing_status = 'completed' AND p2.indexing_status = 'completed'
-          ORDER BY pl.score DESC
+          ORDER BY s.title ASC, pl.score DESC
         `;
         let res = await env.DB.prepare(query).all();
         let reviewable = res.results;

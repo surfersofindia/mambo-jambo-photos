@@ -1352,7 +1352,11 @@ async function loadVerifyQueue() {
     document.getElementById('verifyConfirmed').textContent = stats.confirmed || 0;
     document.getElementById('verifyRejected').textContent = stats.rejected || 0;
     if (!queue?.length) { grid.innerHTML = '<p class="empty-msg">Nothing borderline right now. Scan again once indexing finishes.</p>'; return; }
-    grid.innerHTML = queue.map(item => `
+    let lastSession = null;
+    grid.innerHTML = queue.map(item => {
+      const divider = item.sessionTitle !== lastSession ? `<div class="review-session-divider">${escHtml(item.sessionTitle)}</div>` : '';
+      lastSession = item.sessionTitle;
+      return `${divider}
       <article class="verify-card" id="verify-card-${escHtml(item.id)}">
         <div class="review-heading"><div><span class="eyebrow">A SECOND PAIR OF EYES</span><h3>Same surfer?</h3><p>${escHtml(item.sessionTitle)}</p></div><span class="review-score">${item.similarityPct}%<small>borderline</small></span></div>
         <div class="verify-faces">${[item.photo1, item.photo2].map((photo, index) => `
@@ -1360,7 +1364,8 @@ async function loadVerifyQueue() {
         <div class="review-zoom"><label>Zoom <input type="range" min="1" max="2.5" step=".1" value="1" disabled><output>1×</output></label><button type="button" data-action="reset-zoom">Reset</button></div>
         <p class="review-load-status" role="status">Loading faces…</p>
         <div class="verify-actions"><button class="confirm-btn" data-pair-id="${escHtml(item.id)}" data-action="confirm" disabled>Same</button><button class="reject-btn" data-pair-id="${escHtml(item.id)}" data-action="reject" disabled>Different</button><button class="review-skip" data-pair-id="${escHtml(item.id)}" data-action="skip">Skip</button></div>
-      </article>`).join('');
+      </article>`;
+    }).join('');
     observeReviewImages(grid);
     document.dispatchEvent(new CustomEvent('mj:queue-rendered'));
   } catch (error) { if (version === reviewQueueVersion) grid.innerHTML = `<p class="loading-msg error-msg">${escHtml(error.message)}</p>`; }
@@ -1457,9 +1462,12 @@ async function loadLinkQueue() {
     document.getElementById('linkRejected').textContent = stats.rejected || 0;
     showRetrainStatus(trainedOn);
     if (!queue?.length) { grid.innerHTML = '<p class="empty-msg">No links yet. Needs capture times — re-index, then scan.</p>'; return; }
+    let lastSession = null;
     grid.innerHTML = queue.map(item => {
       const [eyebrow, note] = LINK_TYPE_LABEL[item.linkType] || LINK_TYPE_LABEL.burst;
-      return `
+      const divider = item.sessionTitle !== lastSession ? `<div class="review-session-divider">${escHtml(item.sessionTitle)}</div>` : '';
+      lastSession = item.sessionTitle;
+      return `${divider}
       <article class="verify-card" id="link-card-${escHtml(item.id)}">
         <div class="review-heading"><div><span class="eyebrow">${eyebrow}</span><h3>Same surfer?</h3><p>${escHtml(item.sessionTitle)}</p></div><span class="review-score">${item.scorePct}%<small>${note}</small></span></div>
         <div class="verify-faces">${[item.photo1, item.photo2].map((photo, index) => `
