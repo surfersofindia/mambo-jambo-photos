@@ -167,10 +167,14 @@ kbd{padding:2px 6px;border:1px solid var(--soi-sand-deep);border-bottom-width:2p
 .photo-row-thumb img{display:block;width:100%;height:100%;object-fit:cover}
 .photo-row-status{position:absolute;inset:0;display:grid;place-items:center;background:color-mix(in srgb,var(--soi-umber) 45%,transparent);color:#fff;font:700 13px/1 var(--sans);font-style:normal;opacity:0;transition:opacity var(--duration-fast),background var(--duration-fast)}
 .photo-row:not([data-state="waiting"]) .photo-row-status{opacity:1}
-.photo-row[data-state="uploading"] .photo-row-status::after{content:'';width:18px;height:18px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:review-spin .8s linear infinite}
-/* finished states keep the photo visible and mark it with a corner badge */
-.photo-row[data-state="done"] .photo-row-status,.photo-row[data-state="failed"] .photo-row-status,.photo-row[data-state="skipped"] .photo-row-status{background:transparent;place-items:end}
-.photo-row[data-state="done"] .photo-row-status::after,.photo-row[data-state="failed"] .photo-row-status::after,.photo-row[data-state="skipped"] .photo-row-status::after{display:grid;place-items:center;width:20px;height:20px;margin:0 3px 3px 0;border-radius:50%;box-shadow:0 1px 4px color-mix(in srgb,var(--soi-umber) 35%,transparent)}
+/* Upload progress ring: a plain track plus a fill circle whose stroke-dashoffset is set live from
+   bytes sent (admin.js setRowProgress). Only shown while uploading; the same centered spot then
+   shows the done/failed/skipped glyph below — nothing relocates to a corner badge. */
+.photo-row-ring{position:absolute;inset:0;width:100%;height:100%;opacity:0;transform:rotate(-90deg);transition:opacity var(--duration-fast)}
+.photo-row[data-state="uploading"] .photo-row-ring{opacity:1}
+.photo-row-ring .ring-track{fill:none;stroke:rgba(255,255,255,.3);stroke-width:3}
+.photo-row-ring .ring-fill{fill:none;stroke:#fff;stroke-width:3;stroke-linecap:round;stroke-dasharray:94.248;stroke-dashoffset:94.248;transition:stroke-dashoffset var(--duration-fast)}
+.photo-row[data-state="done"] .photo-row-status::after,.photo-row[data-state="failed"] .photo-row-status::after,.photo-row[data-state="skipped"] .photo-row-status::after{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;box-shadow:0 1px 4px color-mix(in srgb,var(--soi-umber) 35%,transparent)}
 .photo-row[data-state="done"] .photo-row-status::after{content:'✓';background:var(--success)}
 .photo-row[data-state="failed"] .photo-row-status::after{content:'✕';background:var(--error)}
 .photo-row[data-state="skipped"] .photo-row-status::after{content:'–';background:var(--soi-umber-soft)}
@@ -366,5 +370,4 @@ kbd{padding:2px 6px;border:1px solid var(--soi-sand-deep);border-bottom-width:2p
 /* ── Reduced motion ───────────────────────────────────────────────────── */
 @media(prefers-reduced-motion:reduce){
 *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
-.photo-row[data-state="uploading"] .photo-row-status::after{border-color:#fff}
 }

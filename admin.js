@@ -389,15 +389,24 @@ function releaseThumbnails(files) {
   for (const file of files) { const url = thumbnailUrls.get(file); if (url) { URL.revokeObjectURL(url); thumbnailUrls.delete(file); } }
 }
 const ROW_LABELS = { waiting: 'Waiting', uploading: 'Sending…', done: 'Sent', failed: 'Failed', skipped: 'Skipped' };
+// Matches the SVG ring's r=15 in photoRow() below — the circle's stroke-dashoffset walks from this
+// (empty) down to 0 (full) as bytes go out, then resets so the next file starts from empty again.
+const RING_CIRCUMFERENCE = 2 * Math.PI * 15;
 // One list row: thumbnail with a status overlay, filename + size, optional tag and trailing control.
 function photoRow(file, { tag = '', control } = {}) {
   const row = document.createElement('li'); row.className = 'photo-row'; row.dataset.state = 'waiting';
   const thumb = document.createElement('div'); thumb.className = 'photo-row-thumb';
   const image = document.createElement('img'); image.src = thumbnailFor(file); image.alt = ''; image.loading = 'lazy'; image.decoding = 'async';
   const status = document.createElement('i'); status.className = 'photo-row-status'; status.setAttribute('role', 'img'); status.setAttribute('aria-label', ROW_LABELS.waiting);
-  thumb.append(image, status);
+  // Upload progress ring: plain track + a fill circle whose stroke-dashoffset tracks bytes sent.
+  // Drawn after `status` so it sits on top of the dark scrim, visible only while uploading; the
+  // same centered spot then shows the done/failed/skipped glyph, never a relocated corner badge.
+  const ring = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  ring.setAttribute('class', 'photo-row-ring'); ring.setAttribute('viewBox', '0 0 36 36'); ring.setAttribute('aria-hidden', 'true');
+  ring.innerHTML = '<circle class="ring-track" cx="18" cy="18" r="15"/><circle class="ring-fill" cx="18" cy="18" r="15"/>';
+  thumb.append(image, status, ring);
   const name = document.createElement('span'); name.className = 'photo-row-name'; name.textContent = file.name;
-  const size = document.createElement('small'); size.textContent = `${(file.size / 1048576).toFixed(1)} MB`; name.append(size);
+  const size = document.createElement('small'); size.dataset.total = file.size; size.textContent = `${(file.size / 1048576).toFixed(1)} MB`; name.append(size);
   const badge = document.createElement('em'); badge.className = 'photo-row-tag'; badge.textContent = tag; badge.title = tag;
   row.append(thumb, name, badge);
   if (control) row.append(control);
@@ -409,10 +418,23 @@ function setRowState(row, state, { tag, kind, title } = {}) {
   const status = row.querySelector('.photo-row-status');
   status.setAttribute('aria-label', title || ROW_LABELS[state] || state); status.title = title || '';
   if (tag !== undefined) { const badge = row.querySelector('.photo-row-tag'); badge.textContent = tag; badge.title = tag; if (kind) badge.dataset.kind = kind; else delete badge.dataset.kind; }
+  // Every state change is a fresh start for the ring/byte readout — setRowProgress fills them
+  // back in while that particular attempt is actually sending.
+  const ring = row.querySelector('.ring-fill'); if (ring) ring.style.strokeDashoffset = String(RING_CIRCUMFERENCE);
+  const size = row.querySelector('.photo-row-name small'); if (size) size.textContent = `${(Number(size.dataset.total) / 1048576).toFixed(1)} MB`;
   if (state === 'uploading') row.scrollIntoView({ block: 'nearest' });
+}
+// Live bytes-sent readout for one row: fills the ring and swaps the size label to "x.x / y.y MB".
+function setRowProgress(row, loaded, total) {
+  if (!row || !total) return;
+  const ring = row.querySelector('.ring-fill');
+  if (ring) ring.style.strokeDashoffset = String(RING_CIRCUMFERENCE * (1 - Math.min(1, loaded / total)));
+  const size = row.querySelector('.photo-row-name small');
+  if (size) size.textContent = `${(loaded / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MB`;
 }
 // Translate one upload result into a row state so both flows show identical ticks.
 function markRowFromResult(row, state, detail) {
+  if (state === 'progress') return setRowProgress(row, detail.loaded, detail.total);
   if (state === 'failed') return setRowState(row, 'failed', { tag: 'Failed', kind: 'error', title: detail?.message });
   if (state === 'waiting') return setRowState(row, 'waiting', { tag: detail?.cancelled ? 'Not sent' : '' });
   if (state !== 'done') return setRowState(row, state, { tag: '' });
@@ -550,7 +572,11 @@ async function uploadPhotoBatch(sessionId, items, onProgress, onItem = () => {})
     xhr.upload.onprogress = (ev) => {
       watch(UPLOAD_STALL_MS);                     // bytes moved: push the stall deadline out
       if (!ev.lengthComputable) return;
-      fileProgress[index] = Math.min(item.file.size, item.file.size * ev.loaded / ev.total);
+      // ev.total includes the tiny preview + header riding alongside the original; scaling against
+      // the file's own size keeps this row's "x.x / y.y MB" matching the size already shown for it.
+      const loaded = Math.min(item.file.size, item.file.size * ev.loaded / ev.total);
+      fileProgress[index] = loaded;
+      onItem(index, 'progress', { loaded, total: item.file.size });
       report();
     };
     xhr.upload.onload = () => { stallReason = 'Timed out.'; watch(UPLOAD_RESPONSE_MS); };
