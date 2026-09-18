@@ -5,6 +5,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-09-18
+
 ### Fixed
 - Hostinger (the primary host): `/admin` returned 404 — `.htaccess` had no rewrite to `admin.html`,
   unlike `vercel.json`'s mirror rule. Discovered live during the v1.0.2 deploy verification
