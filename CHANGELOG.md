@@ -5,6 +5,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-09-18
+
+### Added
+- Linux Playwright screenshot baselines (`tests/e2e/__screenshots__/**/*-linux.png`, from v1.0.1's
+  green CI run) so `screenshots.spec.mjs`'s visual comparison runs on CI instead of skipping. No
+  functional change; released only to restore the tag-equals-HEAD invariant this project's deploy
+  process requires.
+
 ## [1.0.1] - 2026-09-18
 
 ### Fixed
