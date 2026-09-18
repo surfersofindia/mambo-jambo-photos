@@ -5,6 +5,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- The "You're offline" banner (`pwa.js`) could get stuck showing on a device that is actually online:
+  it only recomputed on the browser's `online`/`offline` events, which are unreliable across a
+  backgrounded tab — a brief Wi-Fi/cellular handover can fire `offline` while hidden and never fire
+  `online` back once the connection returns. It now also re-checks `navigator.onLine` on
+  `visibilitychange` (tab regains focus) and `pageshow` (bfcache restore). Reported live on
+  production after the v1.0.3 deploy.
+
 ## [1.0.3] - 2026-09-18
 
 ### Fixed

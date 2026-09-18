@@ -26,6 +26,12 @@
     const sync = () => { const offline = navigator.onLine === false; if (offline) place(); banner.hidden = !offline; };
     addEventListener('online', sync); addEventListener('offline', sync);
     addEventListener('resize', () => { if (!banner.hidden) place(); });
+    // The 'offline'/'online' events are unreliable across a backgrounded tab: a brief Wi-Fi/cellular
+    // handover can fire 'offline' while the tab is hidden and never fire 'online' back once the
+    // connection returns, leaving the banner stuck shown on a device that is actually online. Re-check
+    // navigator.onLine directly whenever the tab regains focus rather than trusting only the events.
+    addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sync(); });
+    addEventListener('pageshow', sync);
     sync();
   }
 
