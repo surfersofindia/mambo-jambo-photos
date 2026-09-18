@@ -3,6 +3,13 @@
   "name": "mambo-jambo-photo-api",
   "main": "worker.js",
   "compatibility_date": "2026-09-14",
+  // Every 10 minutes the Worker's `scheduled` handler runs the deep health check, whose HEAD ping
+  // keeps the Hugging Face face service warm (see worker.js). The same tick checks the indexing
+  // queue for a stall and alerts the crew once per incident — one cadence covers both, and the
+  // optional alert settings (ALERT_WEBHOOK_URL, RESEND_API_KEY + ALERT_EMAIL_TO, ALERT_EMAIL_FROM,
+  // ALERT_WEBHOOK_FORMAT, QUEUE_STALL_MINUTES) are secrets/vars set outside this file:
+  // docs/runbook.md sections 2 and 7.
+  "triggers": { "crons": ["*/10 * * * *"] },
   "d1_databases": [
     {
       "binding": "DB",
@@ -37,7 +44,9 @@
         "max_batch_size": 1,
         "max_batch_timeout": 5,
         "max_retries": 3,
-        "max_concurrency": 1
+        // Three photos index in parallel: W1-B confirmed the Space handles three concurrent /extract
+        // calls with inference_workers: 2 (the third queues briefly inside the Space, which is fine).
+        "max_concurrency": 3
       }
     ]
   }

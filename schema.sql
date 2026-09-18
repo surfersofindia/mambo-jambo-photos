@@ -12,7 +12,14 @@ CREATE TABLE IF NOT EXISTS sessions (
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   published_at TEXT,
-  cover_photo_id TEXT REFERENCES photos(id) ON DELETE SET NULL
+  cover_photo_id TEXT REFERENCES photos(id) ON DELETE SET NULL,
+  -- Surf conditions and the next drop time (migration 0014), crew-entered, shown to guests.
+  break_name TEXT,
+  swell_ft REAL,
+  wind TEXT,
+  tide TEXT,
+  photographer TEXT,
+  next_drop_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS photos (
@@ -25,6 +32,9 @@ CREATE TABLE IF NOT EXISTS photos (
   content_type TEXT NOT NULL,
   indexing_status TEXT NOT NULL DEFAULT 'pending' CHECK (indexing_status IN ('pending', 'completed', 'failed')),
   captured_at TEXT,
+  -- Pixel size of the original (migration 0012), parsed from its header at upload; NULL for older photos.
+  width INTEGER,
+  height INTEGER,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS photos_by_session ON photos(session_id);
@@ -49,7 +59,11 @@ CREATE TABLE IF NOT EXISTS searches (
   status TEXT NOT NULL DEFAULT 'preview' CHECK (status IN ('preview', 'paid', 'expired')),
   expires_at TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  paid_at TEXT
+  paid_at TEXT,
+  -- Migration 0015: the colour search's ranked ids (kept beside the face matches so previews,
+  -- access and the ZIP include them) and when the latest 30-day gallery link expires.
+  colour_photo_ids_json TEXT,
+  gallery_link_expires_at TEXT
 );
 CREATE INDEX IF NOT EXISTS searches_by_session ON searches(session_id);
 
@@ -62,7 +76,9 @@ CREATE TABLE IF NOT EXISTS payments (
   currency TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'created' CHECK (status IN ('created', 'verified', 'captured', 'failed')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  paid_at TEXT
+  paid_at TEXT,
+  -- Migration 0015: the checkout phone (already sent to Cashfree), so support can look a guest up. Masked in responses.
+  customer_phone TEXT
 );
 CREATE INDEX IF NOT EXISTS payments_by_search ON payments(search_id);
 
@@ -119,6 +135,9 @@ CREATE TABLE IF NOT EXISTS match_feedback (
   burst_score REAL,
   appearance_similarity REAL,
   label INTEGER NOT NULL CHECK (label IN (0, 1)),
+  -- Belongs with the undo feature (migration 0013, POST /api/admin/undo-review): the
+  -- face_verifications / photo_links id whose decision inserted this row. NULL for older rows.
+  subject_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -150,4 +169,119 @@ CREATE TABLE IF NOT EXISTS login_attempts (
   ip TEXT PRIMARY KEY,
   count INTEGER NOT NULL DEFAULT 0,
   window_start TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Per-client request quotas (migration 0010): one row per key such as match:10m:<ip>; the
+-- Worker's limiter() upserts and reads the window in one statement and fails open if this is missing.
+CREATE TABLE IF NOT EXISTS rate_limits (
+  key TEXT PRIMARY KEY,
+  count INTEGER NOT NULL DEFAULT 0,
+  window_start TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS rate_limits_by_window ON rate_limits(window_start);
+
+-- Revocable crew sessions (migration 0011): every admin token carries a row id; sign-out revokes it.
+-- user_id / role (migration 0016) name the crew account the session belongs to; NULL for the shared password.
+CREATE TABLE IF NOT EXISTS admin_sessions (
+  id TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT,
+  last_seen_at TEXT,
+  ip TEXT,
+  user_agent TEXT,
+  user_id TEXT,
+  role TEXT
+);
+
+-- Per-crew accounts (migration 0016): PBKDF2-SHA256 passwords (hex hash + 16-byte hex salt,
+-- `iterations` rounds), a base32 RFC 6238 TOTP secret enforced once totp_enabled = 1, and a role
+-- (photographer: everything but refunds, free unlocks and deleting published sessions). The shared
+-- ADMIN_PASSWORD keeps working while no enabled account exists or LEGACY_SHARED_LOGIN is 'true'.
+CREATE TABLE IF NOT EXISTS crew_users (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  password_hash TEXT NOT NULL,
+  password_salt TEXT NOT NULL,
+  iterations INTEGER NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('photographer', 'admin')),
+  totp_secret TEXT,
+  totp_enabled INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_login_at TEXT,
+  disabled_at TEXT
+);
+
+-- Audit log (migration 0016): who (account id + name, or 'crew (shared)') did what to which record,
+-- from which IP — sign-ins and failures (attempted name truncated, never a password), deletes,
+-- refunds, grants, publishes, TOTP enablement, account changes. Written best-effort by audit().
+CREATE TABLE IF NOT EXISTS audit_log (
+  id TEXT PRIMARY KEY,
+  actor_user_id TEXT,
+  actor_name TEXT NOT NULL,
+  action TEXT NOT NULL,
+  target_type TEXT,
+  target_id TEXT,
+  detail_json TEXT,
+  ip TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS audit_log_by_time ON audit_log(created_at);
+
+-- Guest funnel events (migration 0013), recorded server-side by the existing handlers: `search`
+-- when a search row is created, then `match` (≥ 1 photo) or `zero_match` (0); `checkout` on
+-- POST /api/checkout; `paid` exactly once per payment when it becomes captured (verify or webhook,
+-- whichever transitions the row first); `download` per original served with ?download=1 and once
+-- per ZIP. Ids and a timestamp only — never a selfie, phone number or IP. GET /api/admin/stats
+-- aggregates them per session; the Worker logs a warning instead of failing when this is missing.
+CREATE TABLE IF NOT EXISTS events (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('search', 'match', 'zero_match', 'checkout', 'paid', 'download')),
+  session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+  search_id TEXT REFERENCES searches(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS events_by_session_kind ON events(session_id, kind);
+
+-- Guest second-chance and crew support tooling (migration 0015). match_hides: the guest's
+-- "Not me, hide" (id leaves the search's lists and never returns from a colour search);
+-- notify_requests: one "tell me when the crew re-indexes" phone per search — the only guest
+-- phone stored on purpose, masked in responses; refunds: Cashfree refunds issued from the studio
+-- (`id` is the refund_id sent to Cashfree, status follows REFUND_STATUS_WEBHOOK); grants: free
+-- unlocks — payments.status has no 'granted' value, so a grant is its own row with no rupees.
+CREATE TABLE IF NOT EXISTS match_hides (
+  id TEXT PRIMARY KEY,
+  search_id TEXT NOT NULL REFERENCES searches(id) ON DELETE CASCADE,
+  photo_id TEXT NOT NULL,
+  similarity REAL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS match_hides_by_search ON match_hides(search_id);
+
+CREATE TABLE IF NOT EXISTS notify_requests (
+  id TEXT PRIMARY KEY,
+  search_id TEXT NOT NULL UNIQUE REFERENCES searches(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  phone TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  notified_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS refunds (
+  id TEXT PRIMARY KEY,
+  payment_id TEXT NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
+  cashfree_refund_id TEXT,
+  amount_paise INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PENDING',
+  reason TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS refunds_by_payment ON refunds(payment_id);
+
+CREATE TABLE IF NOT EXISTS grants (
+  id TEXT PRIMARY KEY,
+  search_id TEXT NOT NULL REFERENCES searches(id) ON DELETE CASCADE,
+  reason TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

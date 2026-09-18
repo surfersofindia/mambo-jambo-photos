@@ -1,0 +1,32 @@
+{
+  "_comment": "Lighthouse CI gate for the public landing page: `npm run lighthouse` starts the dev server on port 4190 (it proxies /api to the Worker, so a static dist/ directory would not do), audits three runs with Lighthouse's default mobile emulation (mid-range Android: 412x823 at 1.75x, 4x CPU slowdown, applied slow-4G/CPU throttling — `devtools`, not Lantern simulation, because Lantern shares HTTP/1.1 bandwidth evenly across in-flight same-origin requests and mis-scores self-hosted fonts by ~300 ms of LCP, see docs/audit/handoff/W2-A.md) and asserts the program budgets on the median run. Lighthouse has no field INP, so total-blocking-time (plus interactive as a warning) stands in for it. resource-summary sizes are transfer sizes: the dev server does not compress, so the 40 KB script budget is asserted on raw bytes here while the real target is 40 KB gzip — `npm run build` prints each page's gzip script weight. Needs Chrome: set CHROME_PATH if it is not on the PATH. Reports land in .lighthouseci/ (gitignore it).",
+  "ci": {
+    "collect": {
+      "url": ["http://127.0.0.1:4190/"],
+      "startServerCommand": "PORT=4190 npm run dev",
+      "startServerReadyPattern": "Preview:",
+      "startServerReadyTimeout": 30000,
+      "numberOfRuns": 3,
+      "settings": {
+        "formFactor": "mobile",
+        "throttlingMethod": "devtools"
+      }
+    },
+    "assert": {
+      "aggregationMethod": "median-run",
+      "assertions": {
+        "largest-contentful-paint": ["error", { "maxNumericValue": 1800 }],
+        "total-blocking-time": ["error", { "maxNumericValue": 200 }],
+        "interactive": ["warn", { "maxNumericValue": 3800 }],
+        "cumulative-layout-shift": ["error", { "maxNumericValue": 0 }],
+        "resource-summary:script:size": ["error", { "maxNumericValue": 40960 }],
+        "resource-summary:image:size": ["error", { "maxNumericValue": 122880 }],
+        "categories:accessibility": ["warn", { "minScore": 1 }]
+      }
+    },
+    "upload": {
+      "target": "filesystem",
+      "outputDir": ".lighthouseci/reports"
+    }
+  }
+}

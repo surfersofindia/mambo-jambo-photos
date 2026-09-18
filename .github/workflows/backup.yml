@@ -1,0 +1,75 @@
+# Nightly D1 backup (W4-D): export the production database, gzip it and upload it to R2 under
+# backups/d1/daily/<YYYY-MM-DD>.sql.gz (plus backups/d1/monthly/<YYYY-MM>.sql.gz on the 1st).
+# Retention is the bucket's lifecycle rule — 30 days on the daily prefix, monthly kept — see
+# docs/runbook.md → "Backups". The two repository secrets below are the only credentials involved;
+# the token needs D1 Read and Workers R2 Storage Edit on this account and nothing else.
+# Nothing here reads or writes anything else in production: no Worker deploy, no D1 write, no
+# migration, no secret change.
+name: Nightly D1 backup
+
+on:
+  schedule:
+    # 19:40 UTC = 01:10 IST, well after the crew has finished uploading a session. Minute 40 keeps
+    # it off GitHub's busy top-of-hour window, where scheduled runs are most often delayed.
+    - cron: '40 19 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Print the plan without exporting or uploading'
+        type: boolean
+        default: false
+
+concurrency:
+  group: d1-backup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # A fork has neither the secrets nor the database; without this guard it would fail every night.
+    if: github.repository == 'surfersofindia/mambo-jambo-photos'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # wrangler only; the backup script itself has no dependencies beyond Node's standard library.
+      - run: npm ci
+
+      # Fail with a sentence someone can act on, rather than wrangler's "you need to log in".
+      - name: Check the credentials exist
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=""
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          if [ -n "$missing" ]; then
+            echo "Missing repository secret(s):$missing — add them under Settings → Secrets and variables → Actions. The token needs D1 Read and Workers R2 Storage Edit (docs/runbook.md §2)." >&2
+            exit 1
+          fi
+
+      - name: Export D1, gzip and upload to R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/backup.mjs ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }}
+
+      # A silent backup failure is the failure mode that matters, so say so loudly in the run summary
+      # (a failed run also emails the repository watchers by GitHub's own default).
+      - name: Report
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "Nightly D1 backup succeeded. Verify occasionally with the restore drill in docs/runbook.md §5." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "**Nightly D1 backup FAILED.** Check the log above, then docs/runbook.md → Backups. Until it passes, the last good copy is the previous night's object in r2://mambo-jambo-photos/backups/d1/daily/." >> "$GITHUB_STEP_SUMMARY"
+          fi

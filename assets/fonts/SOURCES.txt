@@ -1,0 +1,15 @@
+Self-hosted web fonts for photos.surfersofindia.com (wave 2, task F19). All files are SIL OFL 1.1 — see LICENSE-*.txt.
+
+plus-jakarta-sans-400-800.woff2   Plus Jakarta Sans variable (wght 400..800), latin subset. Source: Google Fonts v12 latin file
+                                   (fonts.gstatic.com/s/plusjakartasans/v12/LDIoaomQNQcsA88c7O9yZ4KMCoOg4Ko20yygg_vb.woff2, wght 200..800, 27 272 B),
+                                   trimmed to 400..800 with fontTools: instancer.instantiateVariableFont(font, {'wght': (400, 800)}, optimize=True).
+plus-jakarta-sans-400-800-rupee.woff2  The rupee sign (U+20B9) for the same family, same trim; from Google Fonts with &text=%E2%82%B9.
+fraunces-500.woff2                 Fraunces static instance opsz 36 / wght 500 (SOFT 0, WONK 0), latin subset.
+                                   Source: Google Fonts v38, css2?family=Fraunces:ital,opsz,wght@0,36,500 — opsz is pinned at 36 because the
+                                   site's Fraunces headings run 18–52 px and the browser used opsz = font-size with the old variable file.
+fraunces-500-italic.woff2          Same, italic (css2?family=Fraunces:ital,opsz,wght@1,36,500).
+fraunces-500-rupee.woff2           U+20B9 for Fraunces 500 upright (Google Fonts &text=%E2%82%B9).
+
+Unicode ranges declared in soi-tokens.css mirror Google's "latin" subset; the two rupee files carry only U+20B9 because ₹ sits in the
+"latin-ext" block and would otherwise fall back to the system font (the old Google embed pulled a 21 KB + 17 KB latin-ext file for that one glyph).
+Fetch Google's CSS with a current Chrome User-Agent to get woff2 URLs. Weights 500 and 800 render natively from the variable file.

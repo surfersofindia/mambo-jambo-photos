@@ -9,6 +9,43 @@
      white on slate-deep 5.3:1 · slate-deep on linen 4.5:1 · ochre-deep on linen 4.0:1
    Raw slate (#7B9BB4) and raw ochre (#B9975B) are DECORATIVE ONLY — never text.
    ========================================================================== */
+
+/* ── Web fonts (self-hosted, F19) ──────────────────────────────────────────
+   Two families, five files, ~64 KB in total (the Google embed was 234 KB and two extra hosts). assets/fonts/SOURCES.txt has the provenance.
+   Plus Jakarta Sans ships as ONE variable file (wght 400..800): it is smaller than the three static instances 400/600/700 together
+   (20.6 KB vs 36.3 KB) and every weight the stylesheets ask for — 400, 500, 600, 700, 800 — renders from real outlines, so nothing is remapped.
+   Fraunces is a static opsz-36 instance (upright + italic): the variable file cost 77 KB for the opsz axis alone, and 36 sits inside the
+   18–52 px the display headings actually use. ₹ (U+20B9) lives outside Google's latin block, so both families get a one-glyph rupee file
+   instead of the 21 KB + 17 KB latin-ext downloads the old embed pulled for it. `swap` so text paints at once; the *Fallback faces below
+   are the system fonts with their metrics bent to match (size-adjust from measured widths of the site's own copy, ascent/descent from the
+   font tables), so the swap does not move a line — Lighthouse used to log 0.0078 CLS from h1.soi-title alone. */
+@font-face{font-family:'Plus Jakarta Sans';font-style:normal;font-weight:400 800;font-display:swap;src:url(assets/fonts/plus-jakarta-sans-400-800.woff2) format('woff2');
+  unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:'Plus Jakarta Sans';font-style:normal;font-weight:400 800;font-display:swap;src:url(assets/fonts/plus-jakarta-sans-400-800-rupee.woff2) format('woff2');unicode-range:U+20B9}
+@font-face{font-family:'Fraunces';font-style:normal;font-weight:500;font-display:swap;src:url(assets/fonts/fraunces-500.woff2) format('woff2');
+  unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:'Fraunces';font-style:italic;font-weight:500;font-display:swap;src:url(assets/fonts/fraunces-500-italic.woff2) format('woff2');
+  unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:'Fraunces';font-style:normal;font-weight:500;font-display:swap;src:url(assets/fonts/fraunces-500-rupee.woff2) format('woff2');unicode-range:U+20B9}
+/* Metric-matched fallbacks (Arial / Georgia; Helvetica on Macs without Arial). size-adjust was tuned in Chromium against the rendered
+   landing page with the web fonts blocked (docs/audit/handoff/W2-A.md): 400–500 copy sits at 104 % of Arial, 600–700 UI text at 98 % of
+   Arial Bold, the 800 hero title at 95 % (its first line, SURFERS, is the widest and sets the box), Fraunces at 104 % of Georgia and its italic at 97 % of Georgia Italic. With these the fallback
+   layout is line-for-line the web-font layout (same document height at 375 and 1024). Overrides = web font ascent/descent ÷ size-adjust
+   (PJS 1038/222 per 1000, Fraunces 1956/510 per 2000, no line gap). */
+@font-face{font-family:'Plus Jakarta Sans Fallback';font-weight:400 500;src:local('Arial'),local('Helvetica Neue'),local('Helvetica');size-adjust:104%;ascent-override:99.8%;descent-override:21.3%;line-gap-override:0%}
+@font-face{font-family:'Plus Jakarta Sans Fallback';font-weight:600 700;src:local('Arial Bold'),local('Arial-BoldMT'),local('Helvetica Neue Bold'),local('Helvetica Bold');size-adjust:98%;ascent-override:105.9%;descent-override:22.7%;line-gap-override:0%}
+@font-face{font-family:'Plus Jakarta Sans Fallback';font-weight:800;src:local('Arial Bold'),local('Arial-BoldMT'),local('Helvetica Neue Bold'),local('Helvetica Bold');size-adjust:95%;ascent-override:109.3%;descent-override:23.4%;line-gap-override:0%}
+@font-face{font-family:'Fraunces Fallback';font-style:normal;src:local('Georgia');size-adjust:104%;ascent-override:94%;descent-override:24.5%;line-gap-override:0%}
+@font-face{font-family:'Fraunces Fallback';font-style:italic;src:local('Georgia Italic'),local('Georgia-Italic');size-adjust:97%;ascent-override:100.8%;descent-override:26.3%;line-gap-override:0%}
+/* Tracked uppercase labels (W3-A): PJS capitals run ~95 % of Arial's at every weight where its lowercase runs 104 %, so the centred hero
+   lines set in the fallbacks above still moved 3–6 px at the swap (Lighthouse CLS 0.0007 on h1.soi-title > span). Measured with
+   canvas measureText on the page's own strings: SALT WATER… 95.3 %, PHOTOS · FILMS… 94.7 %, the ticker 95.2 %. One family for caps
+   (used through --sans-caps), and one face for the hero title's second line, the single string that runs the other way (F, I, N, D
+   and A are narrow in Arial Bold: OF INDIA needs 101 % where SURFERS needs 95 %). Overrides = web font ascent/descent ÷ size-adjust. */
+@font-face{font-family:'Plus Jakarta Sans Fallback Caps';font-weight:400 500;src:local('Arial'),local('Helvetica Neue'),local('Helvetica');size-adjust:95%;ascent-override:109.3%;descent-override:23.4%;line-gap-override:0%}
+@font-face{font-family:'Plus Jakarta Sans Fallback Caps';font-weight:600 800;src:local('Arial Bold'),local('Arial-BoldMT'),local('Helvetica Neue Bold'),local('Helvetica Bold');size-adjust:95.3%;ascent-override:108.9%;descent-override:23.3%;line-gap-override:0%}
+@font-face{font-family:'Plus Jakarta Sans Fallback Title';font-weight:800;src:local('Arial Bold'),local('Arial-BoldMT'),local('Helvetica Neue Bold'),local('Helvetica Bold');size-adjust:101%;ascent-override:102.8%;descent-override:22%;line-gap-override:0%}
+
 :root{
   /* ── Brand hues ─────────────────────────────────────────────────────── */
   --soi-terracotta:#A8482C;        /* primary accent: CTAs, active, focus ring, badges */
@@ -16,9 +53,11 @@
   --soi-terracotta-tint:#F4E4DC;   /* soft fills, selected rows, toast bg */
   --soi-slate:#7B9BB4;             /* secondary accent (decorative): board silhouette, tag fills */
   --soi-slate-deep:#4E6F88;        /* secondary buttons (solid), metadata text */
+  --soi-slate-ink:#43617A;         /* slate as small/regular-weight text on tinted chips (admin, W1-C): 4.5:1 on slate-tint */
   --soi-slate-tint:#E3ECF2;        /* filter chips, active toggles bg */
   --soi-ochre:#B9975B;             /* supporting neutral: outlines, dividers, hover fills */
   --soi-ochre-deep:#8C6E3A;        /* ochre as (bold) text only */
+  --soi-ochre-ink:#7A5F30;         /* ochre as small/regular-weight text on linen chips (admin, W1-C): ≥4.5:1 */
   --soi-sand:#E7DCC2;              /* card outlines, tag backgrounds */
   --soi-sand-deep:#D9CBA6;         /* hover on sand */
   --soi-canvas:#FCFAF6;            /* page background: warm white (linen was too heavy as a canvas) */
@@ -29,6 +68,7 @@
   --soi-umber-soft:#5C4F43;        /* muted copy (6.7:1 on linen) */
   --soi-coral:#B66B78;             /* reef pink: decorative fills, ticker stars */
   --soi-coral-deep:#9A5563;        /* pink as text / solid button (4.6:1 on canvas) */
+  --soi-coral-ink:#8F4D5B;         /* pink as 20–24 px regular-weight text over the hero photo: 4.9:1 on the darkest pixel behind the tagline (coral-deep was 4.3) */
   --soi-coral-tint:#F5E6E8;        /* favourite chips, draft badges */
   --soi-plum:#5A2E3A;              /* deep accent for dark surfaces */
 
@@ -58,10 +98,12 @@
   /* ── Type ───────────────────────────────────────────────────────────── */
   /* Plus Jakarta Sans stays for UI. Add Fraunces (soft, slightly hand-cut serif)
      for display headings only — it reads like the linocut lettering without
-     being a novelty font.  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&display=swap"> */
-  --sans:'Plus Jakarta Sans',Arial,sans-serif;
-  --display:'Fraunces','Plus Jakarta Sans',Georgia,serif;
-  --mono:'Plus Jakarta Sans',ui-monospace,monospace; /* admin labels; keep the tracked-caps look */
+     being a novelty font. Both are self-hosted (@font-face at the top of this file); the *Fallback
+     entries are the metric-matched system faces and must stay right behind the web font they stand in for. */
+  --sans:'Plus Jakarta Sans','Plus Jakarta Sans Fallback',Arial,sans-serif;
+  --display:'Fraunces','Fraunces Fallback','Plus Jakarta Sans',Georgia,serif;
+  --mono:'Plus Jakarta Sans','Plus Jakarta Sans Fallback',ui-monospace,monospace; /* admin labels; keep the tracked-caps look */
+  --sans-caps:'Plus Jakarta Sans','Plus Jakarta Sans Fallback Caps',Arial,sans-serif; /* tracked uppercase labels: the caps-tuned fallback (see the @font-face note) */
   --fs-eyebrow:11px; --fs-body:15px; --fs-caption:12px;
   --lh-body:1.65;
 

@@ -1,8 +1,22 @@
 # This app ships frequent updates; force revalidation on every load so a
 # fix or content change is never masked by a stale client-side cache.
+# The service worker (sw.js) is matched by the no-cache js rule above, as it must be; the manifest needs its MIME type.
+AddType application/manifest+json .webmanifest
 <IfModule mod_headers.c>
   <FilesMatch "\.(html|js|css)$">
     Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+  # Fingerprinted build output (app.3f2a1b7c.js, site.9c0d1e2f.css — written by `npm run build`, so
+  # deploy from dist/) changes its file name whenever its content changes; the HTML above is always
+  # revalidated and names the current hashes, so these can be cached forever. This block is after the
+  # no-cache block on purpose: for a matching file the later `Header set` wins.
+  <FilesMatch "\.[0-9a-f]{8}\.(js|css)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+  # Self-hosted web fonts (assets/fonts/, F19) are not fingerprinted, but they never change in place: a new cut ships under a new file
+  # name and the (hashed) stylesheet that references it changes with it, so a year-long immutable cache is safe here too.
+  <FilesMatch "\.woff2$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
   </FilesMatch>
   # Security headers. vercel.json sets the same set for the Vercel mirror; Hostinger
   # (the primary host) only sees this file.
@@ -16,5 +30,5 @@
   # reports through one full sandbox payment (open checkout, pay, return, download an original);
   # once a complete run logs none, rename this header to Content-Security-Policy to enforce it.
   # vercel.json carries the identical policy for the Vercel mirror.
-  Header always set Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' https://sdk.cashfree.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' blob: data: https://mambo-jambo-photo-api.surfersofindia.workers.dev; connect-src 'self' https://mambo-jambo-photo-api.surfersofindia.workers.dev https://sdk.cashfree.com https://api.cashfree.com https://sandbox.cashfree.com; frame-src https://*.cashfree.com https://sdk.cashfree.com; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+  Header always set Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' https://sdk.cashfree.com; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' blob: data: https://mambo-jambo-photo-api.surfersofindia.workers.dev; connect-src 'self' https://mambo-jambo-photo-api.surfersofindia.workers.dev https://sdk.cashfree.com https://api.cashfree.com https://sandbox.cashfree.com https://*.r2.cloudflarestorage.com; frame-src https://*.cashfree.com https://sdk.cashfree.com; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 </IfModule>

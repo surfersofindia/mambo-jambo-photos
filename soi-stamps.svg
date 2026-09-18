@@ -11,6 +11,10 @@
   Usage (CSS bg):   background:url(soi-stamps.svg#pattern-wave)  → uses the <view>
   Usage (CSS mask): mask:url(soi-stamps.svg#view-starfish)
   Colour: symbols use fill="currentColor" so `color:` on the <svg> tints them.
+
+  W3-A (wave 3, 2026-09-17): the linocut kit was not supplied, so the placeholder geometry stays. When the traced originals
+  arrive, replace each <symbol> body in place (ids and the 0 0 100 100 viewBox unchanged; the <view> ids and the CSS masks
+  in site.css / soi-tokens.css / admin-theme.css depend on them). No wiring changes are needed for the swap.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="200" viewBox="0 0 200 200">
   <defs>

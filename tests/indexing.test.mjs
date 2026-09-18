@@ -10,9 +10,10 @@ async function setup(context) {
   sql.exec("INSERT INTO sessions(id,title,session_date,location) VALUES('session','Surf','2026-09-15','Mulki'); INSERT INTO photos(id,session_id,object_key,preview_key,filename,content_type) VALUES('photo','session','original','preview','image.jpg','image/jpeg');");
   const messages = [];
   const env = { ADMIN_PASSWORD: 'test-password', SESSION_SECRET: 'test-signing-key', FACE_API_URL: 'https://face.test/extract',
-    DB: { prepare(query) { const statement = sql.prepare(query); let args = []; return {
+    DB: { prepare(query) { const statement = sql.prepare(query); let args = []; return { query,
       bind(...values) { args = values; return this; }, async first() { return statement.get(...args) || null; }, async all() { return { results: statement.all(...args) }; }, async run() { return { meta: { changes: Number(statement.run(...args).changes) } }; }
-    }; }, async batch(statements) { sql.exec('BEGIN'); try { const result = []; for (const statement of statements) result.push(await statement.run()); sql.exec('COMMIT'); return result; } catch (error) { sql.exec('ROLLBACK'); throw error; } } },
+    // Like D1, a batched SELECT answers with its rows (the stats route relies on it); everything else reports `changes`.
+    }; }, async batch(statements) { sql.exec('BEGIN'); try { const result = []; for (const statement of statements) result.push(/^\s*SELECT/i.test(statement.query) ? await statement.all() : await statement.run()); sql.exec('COMMIT'); return result; } catch (error) { sql.exec('ROLLBACK'); throw error; } } },
     PHOTOS: { async get() { return { blob: async () => new Blob(['test image'], { type: 'image/jpeg' }) }; } }, INDEX_QUEUE: { async send(body) { messages.push(body); } }
   };
   const login = await worker.fetch(new Request('https://api.test/api/admin/login', { method: 'POST', body: JSON.stringify({ password: env.ADMIN_PASSWORD }) }), env, {});
@@ -288,13 +289,16 @@ test('the search quota upsert counts within a window, resets once the window has
   for (let i = 0; i < 8; i++) assert.equal((await search()).status, 200);
   const blocked = await search(); assert.equal(blocked.status, 429);
   const retry = Number(blocked.headers.get('retry-after')); assert.ok(retry > 0 && retry <= 600, `retry-after ${retry}`);
-  assert.deepEqual(sql.prepare('SELECT key, count FROM rate_limits ORDER BY key').all().map(row => ({ ...row })), [{ key: 'match:10m:198.51.100.1', count: 9 }, { key: 'match:1d:198.51.100.1', count: 9 }]);
+  // The refusing (ten-minute) window counted the ninth attempt; the daily window, checked after it, did not.
+  assert.deepEqual(sql.prepare('SELECT key, count FROM rate_limits ORDER BY key').all().map(row => ({ ...row })), [{ key: 'match:10m:198.51.100.1', count: 9 }, { key: 'match:1d:198.51.100.1', count: 8 }]);
+  assert.equal((await search()).status, 429);
+  assert.equal(sql.prepare("SELECT count FROM rate_limits WHERE key = 'match:1d:198.51.100.1'").get().count, 8, 'retrying while blocked never charges the daily cap');
   // Age the ten-minute window past its end: the next search opens a fresh window and is allowed,
   // while the untouched daily window keeps counting.
   sql.exec("UPDATE rate_limits SET window_start = datetime('now', '-11 minutes') WHERE key LIKE 'match:10m:%'");
   assert.equal((await search()).status, 200);
   assert.equal(sql.prepare("SELECT count FROM rate_limits WHERE key = 'match:10m:198.51.100.1'").get().count, 1);
-  assert.equal(sql.prepare("SELECT count FROM rate_limits WHERE key = 'match:1d:198.51.100.1'").get().count, 10);
+  assert.equal(sql.prepare("SELECT count FROM rate_limits WHERE key = 'match:1d:198.51.100.1'").get().count, 9);
   // Rows older than the longest window are swept by the next search.
   sql.exec("INSERT INTO rate_limits(key,count,window_start) VALUES('match:10m:stale', 3, datetime('now', '-2 days'))");
   assert.equal((await search()).status, 200);
@@ -312,4 +316,87 @@ test('crew sign-in records an admin_sessions row, requests touch last_seen_at, a
   assert.equal(logout.status, 200); assert.deepEqual(await logout.json(), { ok: true });
   assert.ok(sql.prepare('SELECT revoked_at FROM admin_sessions').get().revoked_at);
   assert.equal((await dashboard()).status, 401);
+});
+
+// ── Wave 2 foundations end to end on real SQLite (lifted from W2-C's scratch script) ─────────
+// Upload → search → checkout → verify → webhook → downloads → stats → confirm → undo → health →
+// delete-session, through the actual Worker against schema.sql, so the SQL itself is what is proved.
+globalThis.FixedLengthStream ??= class { constructor() { const s = new TransformStream(); this.writable = s.writable; this.readable = s.readable; } };
+test('the wave-2 flows hold on real SQLite: header-parsed dimensions, one paid event per payment, downloads, stats, undo, health flags and cascades', async context => {
+  const { sql, env, token } = await setup(context);
+  const { createHmac } = await import('node:crypto');
+  sql.exec(`DELETE FROM photos; DELETE FROM sessions;
+    INSERT INTO sessions(id,title,session_date,location,status,price_paise) VALUES('s1','Surf','2026-09-15','Mulki','published',29900), ('s2','Quiet','2026-09-16','Mulki','published',29900);
+    INSERT INTO photos(id,session_id,object_key,preview_key,filename,content_type,indexing_status) VALUES('p1','s1','o1','v1','a.jpg','image/jpeg','completed'),('p2','s1','o2','v2','b.jpg','image/jpeg','completed');
+    INSERT INTO faces(id,photo_id,embedding_json,bbox_json) VALUES('f1','p1','[1,0]','[10,10,20,20]'),('f2','p2','[0,1]','[10,10,20,20]');
+    INSERT INTO face_verifications(id,session_id,face1_id,face2_id,similarity,status) VALUES('pair1','s1','f1','f2',0.6,'pending');
+    INSERT INTO photo_links(id,session_id,photo1_id,photo2_id,link_type,score,status) VALUES('link1','s1','p1','p2','appearance',0.9,'pending');`);
+  const stored = {};
+  Object.assign(env, { MATCH_THRESHOLD: '0.62', CASHFREE_APP_ID: 'a', CASHFREE_SECRET_KEY: 'test-secret' });
+  env.PHOTOS = { async put(key, value) { stored[key] = value instanceof ReadableStream ? new Uint8Array(await new Response(value).arrayBuffer()) : value; }, async get() { return { body: 'bytes', httpMetadata: { contentType: 'image/jpeg' } }; }, async head() { return { size: 5 }; }, async delete() {} };
+  const api = (path, init) => worker.fetch(new Request(`https://api.test${path}`, init), env, {});
+  const auth = { Authorization: `Bearer ${token}` }; const jsonHeaders = { ...auth, 'content-type': 'application/json' };
+  const events = () => sql.prepare('SELECT kind, session_id, search_id FROM events ORDER BY rowid').all().map(r => [r.kind, r.session_id, r.search_id === null ? null : 'sid']);
+  // 1. Upload: a streamed original whose JPEG header (EXIF 6 → portrait) beats the studio's landscape hint.
+  const be16 = v => [(v >> 8) & 255, v & 255];
+  const seg = (m, p) => [0xFF, m, ...be16(p.length + 2), ...p];
+  const sof = (w, h) => seg(0xC0, [8, ...be16(h), ...be16(w), 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]);
+  const exif6 = seg(0xE1, [0x45, 0x78, 0x69, 0x66, 0, 0, 0x49, 0x49, 0x2A, 0, 8, 0, 0, 0, 1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0]);
+  const original = new Uint8Array(70 * 1024); original.set(Uint8Array.from([0xFF, 0xD8, ...exif6, ...sof(6000, 4000)]));
+  const preview = Uint8Array.from([0xFF, 0xD8, 1, 2, 3]); const len = new Uint8Array(4); new DataView(len.buffer).setUint32(0, preview.length, true);
+  const body = new Blob([len, preview, original]);
+  const up = await api('/api/admin/sessions/s1/photos?type=image%2Fjpeg&filename=DSC.JPG&width=600&height=450', { method: 'POST', headers: { ...auth, 'content-type': 'application/octet-stream', 'content-length': String(body.size) }, body });
+  assert.equal(up.status, 201); const { photoId } = await up.json();
+  assert.deepEqual({ ...sql.prepare('SELECT width, height FROM photos WHERE id = ?').get(photoId) }, { width: 4000, height: 6000 });
+  assert.equal(stored[`sessions/s1/original/${photoId}-DSC.JPG`].length, original.length, 'the original streamed through intact');
+  const grid = await (await api('/api/admin/sessions/s1/photos', { headers: auth })).json();
+  assert.deepEqual(Object.fromEntries(grid.photos.map(p => [p.id, [p.width, p.height]])), { [photoId]: [4000, 6000], p1: [null, null], p2: [null, null] });
+  sql.prepare("INSERT INTO faces(id,photo_id,embedding_json,bbox_json) VALUES('f3',?,'[1,0]','[10,10,20,20]')").run(photoId); sql.prepare("UPDATE photos SET indexing_status = 'completed' WHERE id = ?").run(photoId);
+  // 2. Search → search + match events; previews carry the dimensions, and so does the refresh.
+  context.mock.method(globalThis, 'fetch', async url => String(url).includes('face.test') ? Response.json({ faces: [{ embedding: [1, 0] }] }) : String(url).includes('/pg/orders/') ? Response.json({ order_status: 'PAID' }) : Response.json({ order_id: 'mj-order', payment_session_id: 'ps' }));
+  const form = new FormData(); form.append('sessionId', 's1'); form.append('file', new Blob(['x'], { type: 'image/jpeg' }), 'selfie.jpg'); form.append('consent', 'true');
+  const match = await (await api('/api/match', { method: 'POST', body: form })).json();
+  assert.equal(match.count, 2); assert.deepEqual(events(), [['search', 's1', 'sid'], ['match', 's1', 'sid']]);
+  const sizes = Object.fromEntries(match.previews.map(p => [p.photoId, [p.width, p.height]])); assert.deepEqual(sizes, { p1: [null, null], [photoId]: [4000, 6000] });
+  const refreshed = await (await api(`/api/searches/${match.searchId}/previews?token=${encodeURIComponent(match.token)}`)).json();
+  assert.deepEqual(Object.fromEntries(refreshed.photos.map(p => [p.photoId, [p.width, p.height]])), sizes);
+  // 3. Checkout → checkout event; verify → one paid; a webhook after it upgrades the row and adds no second paid.
+  const checkout = await (await api('/api/checkout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ searchId: match.searchId, token: match.token, phone: '9876543210' }) })).json();
+  assert.equal(checkout.orderId, 'mj-order');
+  assert.equal((await api('/api/payment/verify', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ searchId: match.searchId, token: match.token, orderId: 'mj-order' }) })).status, 200);
+  const payload = JSON.stringify({ type: 'PAYMENT_SUCCESS_WEBHOOK', data: { order: { order_id: 'mj-order' }, payment: { cf_payment_id: 555, payment_status: 'SUCCESS' } } });
+  const ts = String(Date.now());
+  assert.equal((await api('/api/payment/webhook', { method: 'POST', headers: { 'x-webhook-signature': createHmac('sha256', 'test-secret').update(`${ts}${payload}`).digest('base64'), 'x-webhook-timestamp': ts }, body: payload })).status, 200);
+  assert.deepEqual({ ...sql.prepare('SELECT status, cashfree_payment_id FROM payments').get() }, { status: 'captured', cashfree_payment_id: '555' });
+  assert.deepEqual(events().slice(2), [['checkout', 's1', 'sid'], ['paid', 's1', 'sid']]);
+  // 4. Downloads: one event per ?download=1 original, one per ZIP, none for inline views.
+  const access = await (await api(`/api/searches/${match.searchId}/access?token=${encodeURIComponent(match.token)}`)).json();
+  const relative = link => new URL(link).pathname + new URL(link).search;
+  await api(relative(access.photos[0].downloadUrl)); await api(relative(access.photos[0].url));
+  const zip = await api(`/api/searches/${match.searchId}/download?token=${encodeURIComponent(match.token)}`); assert.equal(zip.status, 200); await zip.arrayBuffer();
+  assert.deepEqual(events().slice(4), [['download', 's1', 'sid'], ['download', 's1', 'sid']], 'a paid search\'s original download names the search, like the ZIP');
+  // 5. Stats (batched SELECTs answer with rows, as on D1).
+  const stats = await (await api('/api/admin/stats', { headers: auth })).json();
+  assert.deepEqual(stats.sessions.map(s => [s.sessionId, s.searches, s.matches, s.zeroMatches, s.zeroMatchRate, s.checkouts, s.unlocks, s.downloads, s.rupees, s.grants]).sort(), [['s1', 1, 1, 0, 0, 1, 1, 2, 299, 0], ['s2', 0, 0, 0, 0, 0, 0, 0, 0, 0]]);
+  assert.deepEqual(stats.totals, { searches: 1, matches: 1, zeroMatches: 0, zeroMatchRate: 0, checkouts: 1, unlocks: 1, downloads: 2, rupees: 299, grants: 0 });
+  // 6. Undo: confirm-match tags subject_id; undo reverts and deletes; stale is refused; the untagged fallback works for links.
+  const post = (path, data) => api(path, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(data) });
+  assert.equal((await post('/api/admin/confirm-match', { pairId: 'pair1', confirmed: true })).status, 200);
+  assert.deepEqual(sql.prepare('SELECT source, face_similarity, label, subject_id FROM match_feedback').all().map(r => ({ ...r })), [{ source: 'face_pair', face_similarity: 0.6, label: 1, subject_id: 'pair1' }]);
+  assert.deepEqual(await (await post('/api/admin/undo-review', { kind: 'pair', id: 'pair1' })).json(), { success: true, kind: 'pair', id: 'pair1', status: 'pending' });
+  assert.equal(sql.prepare('SELECT status FROM face_verifications').get().status, 'pending'); assert.equal(sql.prepare('SELECT COUNT(*) n FROM match_feedback').get().n, 0);
+  assert.equal((await post('/api/admin/undo-review', { kind: 'pair', id: 'pair1' })).status, 409);
+  assert.equal((await post('/api/admin/confirm-link', { linkId: 'link1', confirmed: false })).status, 200);
+  sql.exec("UPDATE photo_links SET updated_at = datetime('now', '-11 minutes') WHERE id = 'link1'");
+  const late = await post('/api/admin/undo-review', { kind: 'link', id: 'link1' });
+  assert.equal(late.status, 409); assert.equal((await late.json()).error, 'Too late to undo — the queue moved on.');
+  sql.exec("UPDATE photo_links SET updated_at = datetime('now', '-1 minutes') WHERE id = 'link1'; UPDATE match_feedback SET subject_id = NULL");
+  assert.equal((await post('/api/admin/undo-review', { kind: 'link', id: 'link1' })).status, 200);
+  assert.equal(sql.prepare("SELECT status FROM photo_links WHERE id = 'link1'").get().status, 'pending'); assert.equal(sql.prepare('SELECT COUNT(*) n FROM match_feedback').get().n, 0);
+  assert.equal((await post('/api/admin/undo-review', { kind: 'link', id: 'nope' })).status, 404);
+  // 7. Health reports every migration; deleting the session cascades its events.
+  const health = await (await api('/api/health')).json();
+  assert.deepEqual(health.migrations, { adminSessions: true, rateLimits: true, photoDimensions: true, events: true, sessionConditions: true, support: true, crewAccounts: true });
+  assert.equal((await api('/api/admin/sessions/s1', { method: 'DELETE', headers: auth })).status, 200);
+  assert.equal(sql.prepare('SELECT COUNT(*) n FROM events').get().n, 0);
 });

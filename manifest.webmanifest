@@ -1,0 +1,21 @@
+{
+  "name": "Surfers of India — Photo Finder",
+  "short_name": "SOI Photos",
+  "description": "Pick your session, drop a selfie, find your waves.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "lang": "en-IN",
+  "dir": "ltr",
+  "theme_color": "#F2ECDB",
+  "background_color": "#FCFAF6",
+  "categories": ["photo", "sports", "lifestyle"],
+  "icons": [
+    { "src": "assets/soi-logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "assets/soi-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/soi-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/soi-icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

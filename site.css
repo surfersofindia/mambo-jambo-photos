@@ -13,13 +13,15 @@ button:disabled{opacity:.5;cursor:not-allowed}
 /* :focus-visible (terracotta ring + linen halo) is owned by soi-tokens.css */
 .skip{position:fixed;top:-80px;padding:15px;background:var(--soi-surface);z-index:20}
 .skip:focus{top:10px}
+/* screen-reader-only text (the spoken half of a ticking countdown) */
+.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 
 /* header & nav */
 .header{position:sticky;top:0;z-index:15;max-width:none;margin:0;height:auto;padding:20px 5%;display:flex;align-items:center;justify-content:space-between;background:#FCFAF6EE;backdrop-filter:blur(14px);color:var(--soi-umber);border-bottom:1px solid transparent;transition:border-color var(--duration-base) var(--ease-out),box-shadow var(--duration-base) var(--ease-out)}
 .header.is-scrolled{border-color:var(--soi-sand);box-shadow:0 8px 24px -20px rgba(43,32,24,.45)}
-.brand{display:flex;gap:12px;align-items:center;text-decoration:none;font-weight:800;font-size:16px;letter-spacing:-.4px;color:inherit}
+.brand{display:flex;gap:12px;align-items:center;min-height:44px;text-decoration:none;font-weight:800;font-size:16px;letter-spacing:-.4px;color:inherit}
 .brand img{border-radius:9px;flex-shrink:0}
-.brand small{display:block;font-size:9px;letter-spacing:1.6px;margin-top:5px;font-weight:600;opacity:.7}
+.brand small{display:block;font-size:11px;letter-spacing:1.6px;margin-top:5px;font-weight:600;opacity:.7}
 nav{display:flex;align-items:center;gap:30px}
 nav a{padding:12px 0;text-decoration:none;font-size:13px;font-weight:600;color:inherit;opacity:.85;transition:opacity var(--duration-fast)}
 nav a:hover,nav a[aria-current=location]{opacity:1}
@@ -33,11 +35,15 @@ nav .nav-cta{opacity:1}
 .nav-toggle[aria-expanded=true] span:nth-child(3){transform:translateY(-7px) rotate(-45deg)}
 
 /* typography */
-.eyebrow{font-size:10px;letter-spacing:1.8px;font-weight:700;line-height:1.6;text-transform:uppercase;color:var(--soi-slate-deep)}
+.eyebrow{font-size:var(--fs-eyebrow);letter-spacing:1.8px;font-weight:700;line-height:1.6;text-transform:uppercase;color:var(--soi-slate-deep)}
 .dot{display:inline-block;height:7px;width:7px;border-radius:50%;background:var(--soi-terracotta);margin-right:8px}
 h1{font:500 clamp(34px,4vw,52px)/1.05 var(--display);letter-spacing:-.01em;margin:20px 0}
 h2{font:500 clamp(30px,3.4vw,44px)/1.1 var(--display);letter-spacing:-.01em;margin:14px 0 20px}
 h3{font-size:22px;font-weight:600;letter-spacing:-.005em}
+h1,h2{text-wrap:balance}
+p{text-wrap:pretty}
+/* prices and counts line up when they change (unlock button, lightbox counter, checkout title) */
+.pricing-amount,#unlockPrice,#unlockPriceBar,#payAmount,#favouriteCount,#favouriteCountBar,#lightboxCount,#checkoutTitle,#resultsTitle b,.session-date strong,.gallery figcaption,.countdown,#checkoutPerPhoto{font-variant-numeric:tabular-nums}
 h1 em,h2 em{font-style:italic;font-weight:500;color:var(--soi-coral-deep)}
 .intro{max-width:420px;font-size:16px;line-height:1.7;color:var(--soi-umber-soft)}
 
@@ -60,18 +66,27 @@ h1 em,h2 em{font-style:italic;font-weight:500;color:var(--soi-coral-deep)}
 .hero-photo{position:absolute;inset:0;z-index:-2}
 .hero-photo picture,.hero-photo img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;display:block}
 .hero-copy{width:100%;max-width:720px;display:flex;flex-direction:column;align-items:center}
-.hero-hand{font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin:0 0 18px}
+.hero-hand{font-family:var(--sans-caps);font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin:0 0 18px}
+/* the second title line is the one string whose Arial Bold run is narrower than the web font's (soi-tokens.css, Fallback Title): its own fallback
+   face keeps the centred line from stepping 6px sideways at the swap */
+.soi-title span{font-family:'Plus Jakarta Sans','Plus Jakarta Sans Fallback Title',Arial,sans-serif}
+/* tagline over the photo: coral-deep measured 4.34:1 on the darkest pixel behind it at 1024 (22.5px, not "large" text); coral-ink clears 4.9 */
+.hero .soi-tagline{color:var(--soi-coral-ink)}
 .hero .intro{max-width:560px;font-size:16px;margin:16px 0}
 .hero .button{margin-top:10px}
 .hero-note{font-size:11px;margin-top:16px}
-.hero-bottom{align-self:stretch;display:grid;grid-template-columns:1fr auto 1fr;gap:20px;align-items:center;margin-top:36px;padding-top:18px;border-top:1px solid;font-size:10px;letter-spacing:1px}
+/* the bottom strip sits where the scrim is thinnest: umber-soft sampled 3.96–4.14:1 on the darkest pixels at 1024/1440 and the slate arrow 3.2:1,
+   so the strip prints in umber and the arrow in dusk (both ≥ 8:1 on the darkest sampled pixel, docs/audit/handoff/W3-A.md) */
+.hero-bottom{align-self:stretch;display:grid;grid-template-columns:1fr auto 1fr;gap:20px;align-items:center;margin-top:36px;padding-top:18px;border-top:1px solid;font-family:var(--sans-caps);font-size:11px;letter-spacing:1px}
+.hero .hero-bottom{color:var(--soi-umber)}
+.hero .hero-bottom a{color:var(--soi-dusk)}
 .hero-bottom span:last-child{text-align:right}
 .hero-bottom a{font-size:20px;text-decoration:none;display:grid;place-items:center;width:44px;height:44px;border-radius:50%;border:1px solid currentColor;transition:background var(--duration-base),transform var(--duration-base)}
 
 /* ticker */
 .ticker{overflow:hidden;white-space:nowrap;padding:16px 0}
 .ticker-track{display:flex;width:max-content}
-.ticker-group{flex-shrink:0;display:flex;align-items:center;font-size:11px;font-weight:700;letter-spacing:2px}
+.ticker-group{flex-shrink:0;display:flex;align-items:center;font-family:var(--sans-caps);font-size:11px;font-weight:700;letter-spacing:2px}
 .ticker-group span{margin:0 32px;font-size:18px}
 
 /* sections */
@@ -92,7 +107,7 @@ html.soi-reveal :is(.section-copy,.finder-card,.section-title,.how-grid article,
 .finder-card{background:var(--soi-surface);border:1px solid var(--soi-sand);border-radius:var(--radius-organic);box-shadow:var(--shadow-card);padding:36px;min-height:380px;transition:box-shadow var(--duration-slow) var(--ease-out),border-color var(--duration-base)}
 .finder-card:focus-within{box-shadow:var(--shadow-card-hover);border-color:var(--soi-ochre)}
 .steps{padding:0;margin:0 0 32px;list-style:none;display:flex;justify-content:space-between;border-bottom:1px solid var(--soi-sand)}
-.steps li{position:relative;font-size:12px;color:var(--soi-umber-soft);padding:0 0 16px;font-weight:500}
+.steps li{position:relative;display:flex;align-items:flex-end;min-height:44px;font-size:12px;color:var(--soi-umber-soft);padding:0 0 14px;font-weight:500}
 .steps li.active,.steps li[aria-current=step]{color:var(--soi-umber);font-weight:700}
 .steps li::after{content:'';position:absolute;bottom:-1px;left:0;width:100%;height:2px;background:var(--soi-slate-deep);transform:scaleX(0);transform-origin:left;transition:transform var(--duration-base) var(--ease-out)}
 .steps li.active::after{transform:scaleX(1)}
@@ -106,12 +121,22 @@ select:focus{border-color:var(--soi-terracotta);box-shadow:0 0 0 4px rgba(168,72
 .status{font-size:13px;line-height:1.6;color:var(--soi-umber-soft)}
 .status.error{color:var(--error)}
 .status:empty{display:none}
-.upload-zone{position:relative;display:flex;align-items:center;justify-content:center;min-height:170px;border:1.5px dashed var(--soi-ochre);background:var(--soi-linen);border-radius:var(--radius-organic);text-align:center;cursor:pointer;overflow:hidden;margin:20px 0;transition:background var(--duration-base),border-color var(--duration-base)}
-.upload-zone:hover,.upload-zone:focus-within{background:var(--soi-terracotta-tint);border-color:var(--soi-terracotta)}
+#finderStatus{min-height:21px;margin:14px 0 0}
+#finderStatus:empty{display:block}
+/* Taking a selfie is the primary path on a phone (where a camera is one tap away); uploading is
+   the secondary option, so its zone is a compact link-like strip until a photo actually fills it —
+   :has() switches it back to the original full box the moment #selfiePreview has an image. */
+.selfie-camera-cta{display:none;margin:20px 0 4px}
+@media(pointer:coarse){.selfie-camera-cta{display:block}}
+.upload-zone{position:relative;display:flex;align-items:center;justify-content:center;gap:6px;min-height:0;padding:12px;border:1px solid var(--soi-sand);background:none;border-radius:var(--radius-chip);text-align:center;cursor:pointer;overflow:hidden;margin:10px 0 20px;transition:background var(--duration-base),border-color var(--duration-base)}
+.upload-zone:hover,.upload-zone:focus-within,.upload-zone.is-dragover{background:var(--soi-terracotta-tint);border-color:var(--soi-terracotta)}
+.upload-zone.is-dragover{border-style:solid}
 .upload-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
-.upload-zone b{display:block;font-size:26px;font-weight:400;margin-bottom:6px;color:var(--soi-slate-deep)}
-.upload-zone small{display:block;margin-top:8px;font-size:11px;color:var(--soi-umber-soft)}
+.upload-zone b{display:none}
+.upload-zone span#uploadPrompt{font-size:13px;font-weight:600;color:var(--soi-terracotta-deep)}
+.upload-zone small{display:inline;margin-left:6px;font-size:11px;font-weight:400;color:var(--soi-umber-soft)}
 .upload-zone img{height:170px;max-width:100%;object-fit:contain}
+.upload-zone:has(img:not([hidden])){padding:0;min-height:170px;border:1.5px dashed var(--soi-ochre);background:var(--soi-linen);border-radius:var(--radius-organic)}
 .consent{display:flex;align-items:flex-start;gap:10px;min-height:44px;font-size:12px;line-height:1.7;color:var(--soi-umber-soft)}
 .consent input{accent-color:var(--soi-terracotta);width:22px;height:22px;flex-shrink:0}
 /* --stage-h is set by app.js from the selfie stage height before the swap, so the card doesn't collapse while matching */
@@ -119,15 +144,15 @@ select:focus{border-color:var(--soi-terracotta);box-shadow:0 0 0 4px rgba(168,72
 
 /* session picker */
 .session-picker{border:0;padding:0;margin:22px 0 0;min-width:0}
-.session-picker legend{font-size:10px;letter-spacing:1px;text-transform:uppercase;font-weight:700;color:var(--soi-umber-soft);padding:0;margin-bottom:12px}
-.session-list{display:grid;gap:10px;max-height:340px;overflow-y:auto;overscroll-behavior:contain;padding:4px;margin:-4px;scrollbar-width:thin;scrollbar-color:var(--soi-sand) transparent}
+.session-picker legend{font-size:11px;letter-spacing:1px;text-transform:uppercase;font-weight:700;color:var(--soi-umber-soft);padding:0;margin-bottom:12px}
+.session-list{position:relative;display:grid;gap:10px;max-height:340px;overflow-y:auto;overscroll-behavior:contain;padding:4px;margin:-4px;scrollbar-width:thin;scrollbar-color:var(--soi-sand) transparent}
 .session-choice{position:relative;display:grid;grid-template-columns:54px minmax(0,1fr) 22px;align-items:center;gap:14px;margin:0;padding:16px;border:1px solid var(--soi-sand);border-radius:var(--radius-btn);background:var(--soi-surface);cursor:pointer;transition:border-color var(--duration-base),background var(--duration-base),box-shadow var(--duration-base)}
 .session-choice input{position:absolute;inset:0;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}
 .session-choice:hover{border-color:var(--soi-terracotta)!important;background:var(--soi-terracotta-tint)!important}
 .session-choice:has(input:checked){border-color:var(--soi-slate-deep)!important;background:var(--soi-slate-tint)!important;box-shadow:0 0 0 1px var(--soi-slate-deep)}
 .session-choice:has(input:focus-visible){outline:2px solid var(--soi-terracotta);outline-offset:3px;box-shadow:var(--ring)}
 .session-date{display:grid;align-content:center;justify-items:center;gap:3px;min-height:58px;border:1px solid var(--soi-sand);border-radius:7px;background:var(--soi-slate-tint);color:var(--soi-slate-deep);color:var(--soi-umber);transition:background var(--duration-base)}
-.session-date small{font-size:9px;text-transform:uppercase;letter-spacing:1px;font-weight:600}
+.session-date small{font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600}
 .session-date strong{font-size:24px;font-weight:600;letter-spacing:-.02em}
 .session-choice:has(input:checked) .session-date{background:var(--soi-surface);border-color:var(--soi-slate-deep)}
 .session-choice-copy{display:grid;gap:5px;min-width:0}
@@ -139,20 +164,18 @@ select:focus{border-color:var(--soi-terracotta);box-shadow:0 0 0 4px rgba(168,72
 .session-choice:has(input:checked) .session-check{background:var(--soi-slate-deep);border-color:var(--soi-slate-deep);color:#fff}
 .finder-card .session-helper{font-size:11px!important;text-align:center;margin:12px 0 0!important;color:var(--soi-umber-soft)}
 .finder-card .selected-session{margin:8px 0 20px;padding:10px 12px;border-left:3px solid var(--soi-terracotta);background:var(--soi-terracotta-tint);font-size:12px;color:var(--soi-terracotta-deep);border-radius:0 6px 6px 0}
-.session-loading{padding:20px 12px;background:var(--soi-linen);border-radius:8px;text-align:center;color:var(--soi-umber-soft);font-size:13px}
+.session-loading{position:absolute;inset:4px;display:grid;place-items:center;margin:0;padding:0 12px;text-align:center;color:var(--soi-umber-soft);font-size:13px;pointer-events:none}
 .session-list[aria-busy=true]{opacity:.6}
 /* skeleton rows keep the card the same height while sessions load, so nothing jumps */
 .skeleton{position:relative;overflow:hidden;background:var(--soi-linen);border-radius:var(--radius-btn)}
 .skeleton::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,#FBF8F0B3,transparent);transform:translateX(-100%);animation:mj-shimmer 1.4s ease-in-out infinite}
 @keyframes mj-shimmer{to{transform:translateX(100%)}}
 .session-skeleton{height:92px;border:1px solid var(--line-soft)}
+.session-skeleton:first-child{height:108px}   /* the first real row carries the "Latest" chip */
 /* colours come from the shared .notice rule in soi-tokens.css */
 .resume-notice{display:grid;gap:10px;margin:0 0 20px;padding:14px 16px}
 .resume-notice p{margin:0;font-size:13px!important;color:var(--soi-umber)!important}
 .resume-notice .button{justify-self:start;padding:11px 16px;font-size:13px}
-.selfie-actions{display:flex;gap:16px;justify-content:center;margin:-10px 0 16px}
-.selfie-actions .text-button{display:none}
-@media(pointer:coarse){.selfie-actions .text-button{display:inline-flex}}
 #sessionFilterWrap{margin-top:20px}
 #sessionFilterWrap label{margin:0 0 8px!important}
 /* 16px stops iOS Safari zooming on focus; the tighter padding keeps the field the same height it was at 13px */
@@ -161,7 +184,7 @@ select:focus{border-color:var(--soi-terracotta);box-shadow:0 0 0 4px rgba(168,72
 
 /* how it works */
 .how{background:var(--soi-slate-deep);color:#fff}   /* coastal dusk: the one big blue block */
-.how .section-title>p,.how-grid p{color:#FFFFFFB8}
+.how .section-title>p,.how-grid p{color:#FFFFFFEB}   /* 4.8:1 on slate-deep (was #FFFFFFB8, 3.6:1) */
 .how h2 em{color:var(--soi-coral-tint)}   /* coral-deep goes muddy on the blue band; the tint is the pink beat here (4.4:1 at display size) */
 .how-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:40px;margin-top:56px}
 /* three equal columns is the template tell: steps two and three hang lower, like notes pinned one after another */
@@ -171,7 +194,7 @@ select:focus{border-color:var(--soi-terracotta);box-shadow:0 0 0 4px rgba(168,72
 .how-grid article:hover{transform:translateY(-4px)}
 .step-number{display:block;font:800 40px/1 var(--sans);letter-spacing:-.02em;color:var(--soi-linen);margin:16px 0 16px;transition:transform var(--duration-slow) var(--ease-out)}
 .how-grid article:hover .step-number{transform:translateY(-4px)}
-.how-grid h3{font-size:21px;color:var(--soi-linen)}
+.how-grid h3{font-size:21px;color:#F7F3E8}   /* 4.8:1 on slate-deep; raw linen is 4.50:1, no margin at 21px/600 */
 .how-grid p{font-size:14px;line-height:1.8;max-width:290px}
 
 /* sessions & pricing */
@@ -182,10 +205,13 @@ select:focus{border-color:var(--soi-terracotta);box-shadow:0 0 0 4px rgba(168,72
 .session-card:active{transform:translateY(-1px) scale(.99)}
 .session-card img{width:100%;height:220px;object-fit:cover;border-radius:var(--radius-organic);background:var(--soi-linen);transition:filter var(--duration-base)}
 .session-card:hover img{filter:brightness(1.02)}
-.session-card small{display:block;font-size:10px;letter-spacing:1px;font-weight:600;color:var(--soi-slate-deep);margin-top:18px}
+.session-card small{display:block;font-size:11px;letter-spacing:1px;font-weight:600;color:var(--soi-slate-deep);margin-top:18px}
 .session-card h3{font-size:19px;margin:10px 0}
 .session-card p{font-size:13px;color:var(--soi-umber-soft)}
 .session-card h3 span{float:right}
+/* "Today's session lands by 4:30 pm": only rendered when GET /api/sessions carries a future nextDropAt within 24 h (app.js), otherwise the element stays hidden */
+.next-drop{display:inline-flex;align-items:center;gap:8px;margin:14px 0 0;padding:8px 12px;border:1px dashed var(--soi-ochre);border-radius:var(--radius-chip);background:var(--soi-linen);font-size:13px;font-weight:600;color:var(--soi-umber)}
+.next-drop::before{content:'';width:10px;height:10px;border-radius:50%;background:var(--soi-terracotta);flex-shrink:0}
 .pricing-card{position:relative;background:var(--soi-surface);border:1px solid var(--soi-sand);border-radius:var(--radius-organic);box-shadow:var(--shadow-card);padding:36px;max-width:420px;transition:box-shadow var(--duration-slow) var(--ease-out),border-color var(--duration-base)}
 .pricing-card:hover{box-shadow:var(--shadow-card-hover);border-color:var(--soi-ochre)}
 .pricing-card h3{margin:0}
@@ -207,9 +233,10 @@ footer>div{display:flex;gap:6px 14px;font-size:12px;flex-wrap:wrap;align-items:c
 footer a{min-height:44px;display:inline-flex;align-items:center;text-decoration:none;opacity:.85;padding:10px 4px;transition:opacity var(--duration-fast)}
 footer a:hover{opacity:1}
 .motion-toggle{min-height:44px;padding:0;border:0;background:none;color:inherit;font-size:12px;display:inline-flex;align-items:center;gap:9px}
-.motion-toggle span{display:inline-grid;place-items:center;border:1px solid #F2ECDB40;border-radius:50%;width:22px;height:22px;font-size:9px}
+.motion-toggle span{display:inline-grid;place-items:center;border:1px solid #F2ECDB40;border-radius:50%;width:22px;height:22px;font-size:11px}
 
 /* results / gallery */
+.results{min-height:100vh}   /* the footer stays below the fold at the finder → results swap, so it never registers as a layout shift */
 .results h1{font-size:44px;letter-spacing:-.02em}
 .results .section-title{margin-top:20px}
 .results .section-title p:not(.eyebrow){font-size:14px;color:var(--soi-umber-soft)}
@@ -218,10 +245,20 @@ footer a:hover{opacity:1}
 .filter-button:hover{background:var(--soi-linen)}
 .filter-button:active{transform:translate(1px,1px);box-shadow:1px 1px 0 var(--stamp-ink)}
 .filter-button[aria-pressed=true]{background:var(--soi-coral-deep);color:#fff;border-color:var(--soi-coral-deep)}
-.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:18px;margin-top:32px}
+.results-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+/* share looks like the keepers filter but is never handed to the phone bar: WhatsApp is most useful on the phone */
+.share-button{border:1px solid var(--soi-sand);padding:12px 18px;min-height:44px;background:var(--soi-surface);color:var(--soi-umber);border-radius:var(--radius-organic-sm);white-space:nowrap;box-shadow:2px 2px 0 var(--stamp-ink);font-weight:600;transition:background var(--duration-base),box-shadow var(--duration-fast),transform var(--duration-fast)}
+.share-button:hover{background:var(--soi-linen)}
+.share-button:active{transform:translate(1px,1px);box-shadow:1px 1px 0 var(--stamp-ink)}
+/* session conditions from /api/sessions, printed as stamp chips under the results title (chip styles come from soi-tokens.css) */
+.conditions{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.conditions .chip{text-transform:none;color:var(--soi-slate-ink)}   /* 11px/600 on slate-tint: slate-deep reads 4.2:1 there, slate-ink 5.4 */
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:18px;margin-top:32px;align-items:start}   /* auto-fill, never fixed columns: five 216px prints across the 1152px section at ≥1280 (220px would drop to four); align-items:start so a contact sheet of mixed ratios keeps ragged row bottoms instead of stretching */
 .gallery figure{margin:0;position:relative;min-width:0}
-.photo-open{display:block;border:0;padding:0;background:var(--soi-linen);width:100%;border-radius:var(--radius-organic);overflow:hidden}   /* each print is cut by hand, no two corners alike */
-.photo-open img{display:block;width:100%;aspect-ratio:4/3;object-fit:cover;opacity:1;transition:transform var(--duration-slow) var(--ease-out),opacity var(--duration-base)}
+/* the button is the print's box: app.js sets aspect-ratio inline from photo.width/height (W2-C, migration 0012), so the ratio is known before the
+   image arrives and nothing moves on load; a pre-0012 photo (null dimensions) keeps this 4:3 box and is cover-cropped as before */
+.photo-open{display:block;border:0;padding:0;background:var(--soi-linen);width:100%;aspect-ratio:4/3;border-radius:var(--radius-organic);overflow:hidden}   /* each print is cut by hand, no two corners alike */
+.photo-open img{display:block;width:100%;height:100%;aspect-ratio:4/3;object-fit:cover;opacity:1;transition:transform var(--duration-slow) var(--ease-out),opacity var(--duration-base)}
 .photo-open:hover img{transform:scale(1.03)}
 .photo-open:active img{transform:scale(.99)}
 /* tiles shimmer until their image has decoded — the 4:3 box is already reserved, so no layout shift */
@@ -229,16 +266,57 @@ figure.is-loading .photo-open{position:relative}
 figure.is-loading .photo-open::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,#FBF8F0B3,transparent);transform:translateX(-100%);animation:mj-shimmer 1.4s ease-in-out infinite}
 figure.is-loading .photo-open img{opacity:0}
 /* a tile whose link expired: starfish stamp instead of alt text painting across the box (app.js sets is-broken) */
-figure.is-broken .photo-open{display:grid;place-items:center;aspect-ratio:4/3;color:var(--soi-umber-soft);font-size:12px}
+figure.is-broken .photo-open{display:grid;place-items:center;color:var(--soi-umber-soft);font-size:12px}   /* keeps the tile's own aspect-ratio */
 figure.is-broken .photo-open img{display:none}
 figure.is-broken .photo-open::before{content:'';width:56px;height:56px;background:var(--soi-ochre);mask:url(soi-stamps.svg#view-starfish) center/contain no-repeat;-webkit-mask:url(soi-stamps.svg#view-starfish) center/contain no-repeat}
 .favourite{position:absolute;right:10px;top:10px;display:grid;place-items:center;background:var(--soi-surface);border:0;border-radius:50%;width:48px;height:48px;font-size:22px;line-height:1;color:var(--soi-umber);box-shadow:2px 2px 0 var(--stamp-ink);transition:transform var(--duration-fast),background var(--duration-base),color var(--duration-base)}
 .favourite:hover{transform:scale(1.08)}
 .favourite:active{transform:scale(.94)}
 .favourite[aria-pressed=true]{background:var(--soi-coral-deep);color:#fff}
-.gallery figcaption{display:flex;justify-content:space-between;gap:10px;font-size:11px;margin-top:10px;color:var(--soi-umber-soft)}
-.gallery figcaption a{color:var(--soi-terracotta);font-weight:600;text-decoration:none;text-underline-offset:4px}
+.gallery figcaption{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:11px;margin-top:10px;color:var(--soi-umber-soft)}
+.gallery figcaption:has(a){min-height:44px;margin-top:2px}   /* F24: the Download link gets a 44px row once the pack is unlocked */
+.gallery figcaption a{display:inline-flex;align-items:center;min-height:44px;padding:0 8px;margin-right:-8px;color:var(--soi-terracotta);font-weight:600;text-decoration:none;text-underline-offset:4px}
 .gallery figcaption a:hover{text-decoration:underline}
+/* "Not me" (W3-A): a plain text button in the caption with the same 44px row as the Download link, in the muted caption colour until hovered so the print stays the loud thing */
+.gallery figcaption:has(.hide-photo){min-height:44px;margin-top:2px}
+.gallery figcaption .hide-photo{display:inline-flex;align-items:center;min-height:44px;padding:0 8px;margin-right:-8px;border:0;background:none;font:inherit;font-weight:600;color:var(--soi-umber-soft);white-space:nowrap;text-underline-offset:4px}
+.gallery figcaption .hide-photo:hover{color:var(--soi-terracotta);text-decoration:underline}
+/* post-payment: the 30-day link to WhatsApp, with the bearer-link hint on one line under it */
+.gallery-share{display:grid;gap:8px;justify-items:start;margin-top:18px}
+.gallery-share-hint{margin:0;font-size:12px;line-height:1.6;color:var(--soi-umber-soft)}
+/* zero-match second chance: the colour search and the notify form side by side, each a dashed card like the empty state above them */
+.second-chance{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;margin-top:18px}
+.chance-card{padding:28px 24px;border:1px dashed var(--soi-ochre);border-radius:var(--radius-organic);background:var(--soi-surface);text-align:center}
+.chance-card h3{margin:10px 0 8px}
+.chance-card>p:not(.eyebrow):not(.status){margin:0 auto;max-width:36ch;font-size:13px;line-height:1.7;color:var(--soi-umber-soft)}
+.chance-card .button{margin-top:18px}
+.chance-card .status{margin:12px 0 0;min-height:21px}
+.chance-card .status:empty{display:block}
+.chance-card fieldset{border:0;padding:0;margin:0;min-width:0}
+.chance-card legend{font-size:11px;letter-spacing:1px;text-transform:uppercase;font-weight:700;color:var(--soi-umber-soft);padding:0;margin:0 auto}
+/* twelve hues on a ring: each label is a 44px hit box on a 88px radius (neighbours 45.5px apart, so nothing overlaps) with a 34px disc inside;
+   the radio itself is visually hidden and the checked/focus states are drawn on the label via :has() */
+.chance-card .hue-ring{position:relative;width:232px;height:232px;margin:34px auto 0}   /* the legend prints in the 34px above the ring (specificity beats the fieldset reset above) */
+.hue-ring legend{position:absolute;left:0;right:0;top:-26px}
+.hue-name{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:96px;text-align:center;font-size:12px;font-weight:600;color:var(--soi-umber-soft);line-height:1.4}
+.hue-swatch{position:absolute;left:50%;top:50%;width:44px;height:44px;margin:-22px 0 0 -22px;display:grid;place-items:center;cursor:pointer;transform:rotate(calc(var(--i)*30deg)) translateY(-88px) rotate(calc(var(--i)*-30deg))}
+.hue-swatch input{position:absolute;inset:0;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}
+.hue-swatch span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+.hue-swatch::before{content:'';width:34px;height:34px;border-radius:50%;background:hsl(var(--hue) 72% 46%);box-shadow:2px 2px 0 var(--stamp-ink);transition:transform var(--duration-fast)}
+.hue-swatch:hover::before{transform:scale(1.08)}
+.hue-swatch:has(input:checked)::before{outline:3px solid var(--soi-umber);outline-offset:2px;transform:scale(1.08)}
+.hue-swatch:has(input:focus-visible){outline:2px solid var(--soi-terracotta);outline-offset:3px;border-radius:50%;box-shadow:var(--ring)}
+.hue-swatch:has(input:disabled){opacity:.4;cursor:not-allowed}
+.tone-toggle{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:18px}
+.tone-toggle legend{margin-bottom:8px}
+.tone-toggle label{position:relative;display:inline-flex;align-items:center;min-height:40px;padding:8px 14px;border:1px solid var(--soi-sand);border-radius:var(--radius-chip);background:var(--soi-linen);font:600 12px/1 var(--sans);color:var(--soi-umber);cursor:pointer}
+.tone-toggle input{position:absolute;inset:0;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}
+.tone-toggle label:has(input:checked){background:var(--soi-slate-deep);border-color:var(--soi-slate-deep);color:#fff}
+.tone-toggle label:has(input:focus-visible){outline:2px solid var(--soi-terracotta);outline-offset:3px;box-shadow:var(--ring)}
+.notify-form label{display:block;font-size:12px;font-weight:700;margin:18px 0 8px;text-align:left}
+.notify-form input{width:100%;padding:11px 12px;border:1px solid var(--soi-sand);border-radius:var(--radius-input);background:var(--soi-surface);color:var(--soi-umber);font-size:16px;transition:border-color var(--duration-base),box-shadow var(--duration-base)}
+.notify-form input:focus{border-color:var(--soi-terracotta);box-shadow:0 0 0 4px rgba(168,72,44,.14)}
+.notify-form input::placeholder{color:var(--soi-umber-soft)}
 
 /* dialogs */
 dialog{border:0;border-radius:var(--radius-card);background:var(--soi-surface);color:var(--soi-umber);padding:25px;width:min(1050px,95vw);max-height:95vh;text-align:center;box-shadow:0 40px 100px rgba(43,32,24,.35)}
@@ -263,22 +341,46 @@ dialog p{font-size:13px}
 .lightbox-download{display:inline-flex;align-items:center;gap:8px;min-height:48px;padding:10px 18px;border-radius:var(--radius-organic-sm);background:var(--soi-terracotta);color:#fff;font-size:13px;font-weight:600;text-decoration:none;box-shadow:2px 2px 0 var(--stamp-ink);transition:background var(--duration-base),box-shadow var(--duration-fast),transform var(--duration-fast)}
 .lightbox-download:hover{background:var(--soi-terracotta-deep)}
 .lightbox-download:active{transform:translate(1px,1px);box-shadow:1px 1px 0 var(--stamp-ink)}
-.lightbox-hint{font-size:11px!important;color:#F2ECDB80!important;margin:8px 0 0}
-/* one hint per input type: keys for pointer devices, gestures for touch */
+.lightbox-share{border:1px solid #F2ECDB40;background:transparent;color:var(--soi-linen);min-height:48px;padding:10px 18px;border-radius:var(--radius-btn);font-weight:600;transition:background var(--duration-base)}
+.lightbox-share:hover{background:#F2ECDB15}
+.lightbox-hint{font-size:11px!important;color:#F2ECDBB8!important;margin:8px 0 0}   /* 6.7:1 on dusk (was #F2ECDB80, 4.0:1) */
+/* one hint per input type: keys for a fine pointer (mouse, trackpad), gestures for a coarse one (finger) */
 .hint-pointer{display:none}
-@media(hover:hover){.hint-touch{display:none}.hint-pointer{display:inline}}
+@media(pointer:fine){.hint-touch{display:none}.hint-pointer{display:inline}}
 body:has(dialog[open]){overflow:hidden}
 
 /* checkout dialog — light, trust-forward */
 #checkoutDialog{width:min(420px,92vw);text-align:left;background:var(--soi-surface);color:var(--soi-umber)}
-#checkoutDialog h3{margin:0 0 8px}
+#checkoutDialog h3{margin:0 0 4px}
+/* trust block: per-photo price under the count, three ✓ lines of what the pack is, the three ways to pay */
+#checkoutDialog .checkout-summary{margin:0;font-size:13px;color:var(--soi-umber-soft)}
+.checkout-trust{list-style:none;margin:16px 0 0;padding:14px 16px;display:grid;gap:8px;border:1px dashed var(--soi-ochre);border-radius:var(--radius-organic-sm);background:var(--soi-linen);font-size:13px;line-height:1.5;color:var(--soi-umber)}
+.checkout-trust li{display:flex;gap:10px;align-items:center}
+.checkout-trust li::before{content:'✓';flex-shrink:0;width:20px;height:20px;display:grid;place-items:center;border-radius:50%;background:var(--soi-terracotta);color:#fff;font-size:12px;font-weight:700}
+#checkoutDialog .pay-methods{display:flex;flex-wrap:wrap;gap:8px 16px;margin:14px 0 0;font-size:12px;font-weight:600;color:var(--soi-umber-soft)}
+.pay-methods span{display:inline-flex;align-items:center;gap:6px}
+.pay-methods svg{width:20px;height:20px;color:var(--soi-slate-deep)}
 #checkoutDialog p{color:var(--soi-umber-soft)}
+#checkoutDialog .eyebrow{color:var(--soi-slate-deep)}   /* the id rule above would otherwise recolour the eyebrow */
 #checkoutDialog label{display:block;font-size:12px;font-weight:700;margin:18px 0 8px}
 #checkoutDialog input{width:100%;padding:11px 12px;border:1px solid var(--soi-sand);border-radius:var(--radius-input);background:var(--soi-surface);color:var(--soi-umber);font-size:16px;transition:border-color var(--duration-base),box-shadow var(--duration-base)}
 #checkoutDialog input:focus{border-color:var(--soi-terracotta);box-shadow:0 0 0 4px rgba(168,72,44,.14)}
 #checkoutDialog input::placeholder{color:var(--soi-umber-soft)}
 .checkout-actions{display:flex;justify-content:flex-end;gap:16px;margin-top:22px;align-items:center}
 #unlockButton,#downloadAll{margin-top:18px}
+
+/* camera dialog — in-page guided selfie capture */
+#cameraDialog{width:min(420px,92vw);padding:0;background:var(--soi-dusk);color:var(--soi-linen);overflow:hidden}
+#cameraDialog::backdrop{background:#22313DEA}
+.camera-frame{position:relative;aspect-ratio:3/4;background:#000;overflow:hidden}
+#cameraVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+.camera-guide{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.camera-guide ellipse{fill:none;stroke:#F2ECDB8C;stroke-width:2;stroke-dasharray:7 7;transition:stroke var(--duration-base),stroke-width var(--duration-base)}
+.camera-frame[data-aligned="true"] .camera-guide ellipse{stroke:var(--soi-terracotta);stroke-width:3;stroke-dasharray:none}
+.camera-close{position:absolute;top:10px;right:10px;z-index:2;width:40px;height:40px;border:0;border-radius:50%;background:#00000080;color:#fff;font-size:20px;line-height:1;display:grid;place-items:center}
+.camera-status{margin:16px 20px 0;font-size:13px;text-align:center;color:var(--soi-linen)}
+.camera-actions{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;align-items:center;margin:16px 20px 20px}
+.camera-actions .button{margin:0}
 
 /* legal pages */
 .legal{max-width:760px}
@@ -299,7 +401,7 @@ body:has(dialog[open]){overflow:hidden}
   nav a:not(.nav-cta){display:block;padding:14px 4px;opacity:1;border-bottom:1px solid var(--line-soft)}
   nav .nav-cta{display:flex;justify-content:center;margin-top:14px}
   .brand{font-size:13px;gap:8px}
-  .brand small{font-size:7px}
+  .brand small{letter-spacing:1.2px}
   .brand img{width:38px;height:38px}
   .hero{padding:48px 6% 40px}
   .finder{grid-template-columns:1fr;gap:30px}
@@ -318,16 +420,22 @@ body:has(dialog[open]){overflow:hidden}
   .gallery{grid-template-columns:repeat(2,1fr);gap:14px 10px}
   .results h1{font-size:36px}
   .favourite{width:44px;height:44px;right:8px;top:8px;font-size:20px}
-  .results{min-height:70vh}
+  .results.section{padding-bottom:calc(96px + env(safe-area-inset-bottom,0px))}   /* the sticky bar is 73px; soi-tokens' .results rule loses to .section by cascade order */
   footer{padding:32px 6%}
   footer>div{width:100%;border-top:1px solid #F2ECDB30;padding-top:20px}
   /* full-bleed lightbox on phones: the photo gets the whole screen, controls sit in the safe area */
-  #lightbox{width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;margin:0;border-radius:0;padding:56px 0 max(16px,env(safe-area-inset-bottom));display:flex;flex-direction:column;justify-content:center}
-  #lightbox img{height:auto;max-height:calc(100dvh - 190px);width:100%}
-  #lightbox .lightbox-stage{border-radius:0}
+  #lightbox{width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;margin:0;border-radius:0;padding:56px 0 max(16px,env(safe-area-inset-bottom));flex-direction:column;justify-content:center}
+  #lightbox[open]{display:flex}   /* [open] matters: a bare display:flex would also lay the closed dialog out in the page, a full-screen dusk block under the footer */
+  /* the stage is a fixed box (viewport minus caption, controls, hint and padding) so a portrait photo after a landscape
+     one never moves the controls; the image keeps its own box inside it, which the pan clamp in app.js relies on */
+  #lightbox .lightbox-stage{height:calc(100dvh - 190px);display:grid;place-items:center;border-radius:0}
+  #lightbox img{height:auto;max-height:100%;width:100%}
   #lightbox p{margin:14px 0 10px}
   .lightbox-controls{gap:10px;flex-wrap:wrap;padding:0 16px}
   .lightbox-controls button{flex:1 1 90px}
   .lightbox-download{flex:1 1 100%;order:3;justify-content:center}
+  .results-actions{width:100%}
+  .second-chance{grid-template-columns:1fr}
+  .chance-card{padding:24px 16px}
 }
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation:none!important;transition:none!important}}

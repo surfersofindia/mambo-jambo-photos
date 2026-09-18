@@ -8,6 +8,12 @@
    card menu · modals · photo grid · review queues · confirm · responsive.
    ========================================================================== */
 
+/* ── Admin-only ink token ─────────────────────────────────────────────── */
+/* --soi-slate-ink / --soi-ochre-ink now live in soi-tokens.css (W2-A); the local copies are gone.
+   coral-ink lifts the draft chip from a borderline 4.51:1 to 5.14:1 on coral-tint and is still
+   admin-only (the public site never sets coral text on coral-tint). */
+:root{--soi-coral-ink:#8F4D5B}
+
 /* ── Reset & base ─────────────────────────────────────────────────────── */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html{height:100%}
@@ -26,11 +32,11 @@ kbd{padding:2px 6px;border:1px solid var(--soi-sand-deep);border-bottom-width:2p
 .topbar-brand{display:flex;align-items:center;gap:10px;font-size:17px;font-weight:700;letter-spacing:-.6px;color:var(--soi-umber);text-decoration:none;transition:opacity var(--duration-fast),transform var(--duration-fast)}
 .topbar-brand:hover{opacity:.9;transform:translateY(-1px)}
 .topbar-brand img{width:44px;height:44px;object-fit:contain}
-.topbar-brand small{display:block;margin-top:2px;font:9px var(--mono);text-transform:uppercase;letter-spacing:1.7px;color:var(--soi-terracotta)}
-.topbar-right{display:flex;align-items:center;gap:16px}
-.back-link{display:inline-flex;align-items:center;min-height:44px;padding:10px 12px;border-radius:var(--radius-chip);font:10px var(--mono);text-transform:uppercase;letter-spacing:1px;color:var(--soi-terracotta);text-decoration:none;transition:color var(--duration-fast),background var(--duration-fast)}
+.topbar-brand small{display:block;margin-top:2px;font:11px var(--mono);text-transform:uppercase;letter-spacing:1.4px;color:var(--soi-terracotta)}
+.topbar-right{display:flex;flex:none;align-items:center;gap:16px}
+.back-link{display:inline-flex;align-items:center;min-height:44px;padding:10px 12px;border-radius:var(--radius-chip);font:11px var(--mono);text-transform:uppercase;letter-spacing:1px;color:var(--soi-terracotta);text-decoration:none;white-space:nowrap;transition:color var(--duration-fast),background var(--duration-fast)}
 .back-link:hover{color:var(--soi-umber);background:var(--soi-sand)}
-.sign-out-btn{min-height:44px;padding:10px 16px;border:1px solid var(--soi-sand);border-radius:var(--radius-chip);background:var(--soi-surface);color:var(--soi-umber-soft);font:10px var(--mono);text-transform:uppercase;letter-spacing:1px;transition:color var(--duration-fast),border-color var(--duration-fast),background var(--duration-fast)}
+.sign-out-btn{min-height:44px;padding:10px 16px;border:1px solid var(--soi-sand);border-radius:var(--radius-chip);background:var(--soi-surface);color:var(--soi-umber-soft);font:11px var(--mono);text-transform:uppercase;letter-spacing:1px;white-space:nowrap;transition:color var(--duration-fast),border-color var(--duration-fast),background var(--duration-fast)}
 .sign-out-btn:hover{color:var(--soi-terracotta-deep);border-color:var(--soi-terracotta);background:var(--soi-terracotta-tint)}
 /* API health pill (#apiHealth): admin.js sets data-state="ok" | "degraded" | "down" and removes [hidden] */
 .health-pill{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:4px 10px;border:1px solid var(--soi-ochre);border-radius:var(--radius-chip);background:var(--soi-sand);color:var(--soi-umber);font:600 11px/1 var(--sans);letter-spacing:.3px;white-space:nowrap}
@@ -38,8 +44,18 @@ kbd{padding:2px 6px;border:1px solid var(--soi-sand-deep);border-bottom-width:2p
 .health-pill[data-state="ok"]::before{background:var(--success)}
 .health-pill[data-state="degraded"]::before{background:var(--soi-ochre)}
 .health-pill[data-state="down"]::before{background:var(--soi-terracotta)}
+/* narrow phones: one dot + one word; the per-check labels live on in the pill's title / aria-label */
+@media(max-width:480px){
+.health-pill{gap:5px;padding:4px 9px}
+.health-pill .health-check{display:none}
+.health-pill::after{content:'Checking';text-transform:capitalize}
+.health-pill[data-state="ok"]::after{content:'Live'}
+.health-pill[data-state="degraded"]::after{content:'Degraded'}
+.health-pill[data-state="down"]::after{content:'Down'}
+}
 
 /* ── Layout ───────────────────────────────────────────────────────────── */
+.admin-main{flex:1;display:flex;flex-direction:column;min-width:0}   /* the <main> landmark wraps both panes; it must not change the column layout */
 .admin-body{flex:1;display:flex;flex-direction:column;width:100%;max-width:1180px;margin:0 auto;padding:48px 5% 80px}
 
 /* ── Login ────────────────────────────────────────────────────────────── */
@@ -48,19 +64,19 @@ kbd{padding:2px 6px;border:1px solid var(--soi-sand-deep);border-bottom-width:2p
 .login-story>img{position:absolute;inset:0;z-index:-2;width:100%;height:100%;object-fit:cover}
 .login-story::after{content:'';position:absolute;inset:0;z-index:-1;background:linear-gradient(transparent,color-mix(in srgb,var(--soi-umber) 85%,transparent))}
 .login-story>div{position:absolute;bottom:40px;padding:0 32px;color:#fff}
-.login-story .eyebrow{font:9px var(--mono);letter-spacing:1.5px;color:var(--soi-ochre)}
+.login-story .eyebrow{font:11px var(--mono);letter-spacing:1.5px;color:var(--soi-ochre)}
 .login-story h1{margin:16px 0;font:500 clamp(30px,3.4vw,44px)/1.05 var(--display);letter-spacing:-.02em;color:#fff}
 .login-story p{font-size:12px;color:rgba(255,255,255,.8)}
 .stamp-corner{position:absolute;top:22px;right:22px;width:72px;height:72px;color:var(--soi-terracotta);pointer-events:none;--stamp-tilt:-6deg}   /* tilt, bleed and the ink ring come from .soi-stamp / .soi-stamp--ink in soi-tokens.css */
 .login-card{display:flex;flex-direction:column;justify-content:center;width:100%;max-width:none;padding:65px 38px;background:var(--soi-surface);border:1px solid var(--soi-sand);border-radius:0 var(--radius-card) var(--radius-card) 0;box-shadow:var(--shadow-card)}
-.login-card .eyebrow{display:block;margin-bottom:10px;font:10px var(--mono);letter-spacing:2px;color:var(--soi-slate-deep)}
+.login-card .eyebrow{display:block;margin-bottom:10px;font:11px var(--mono);letter-spacing:2px;color:var(--soi-slate-deep)}
 .login-card h2{margin-bottom:14px;font:500 30px/1.15 var(--display);letter-spacing:-.01em}
 .login-intro{margin-bottom:30px;font-size:13px;line-height:1.8;color:var(--soi-umber-soft)}
-.login-card label{display:block;margin-bottom:6px;font:10px var(--mono);text-transform:uppercase;letter-spacing:1px;color:var(--soi-umber-soft)}
+.login-card label,.reauth-panel label{display:block;margin-bottom:6px;font:11px var(--mono);text-transform:uppercase;letter-spacing:1px;color:var(--soi-umber-soft)}
 /* password field + inline Show/Hide toggle; styles are type-agnostic so the password→text flip keeps the field intact */
 .password-field{position:relative;margin-bottom:20px}
-.login-card .password-field input{width:100%;margin:0;padding:15px 84px 15px 15px;border:1px solid var(--soi-sand);border-radius:var(--radius-input);background:var(--soi-surface);color:var(--soi-umber);font-size:16px;transition:border-color var(--duration-fast)}
-.login-card .password-field input:focus{border-color:var(--soi-terracotta)}
+.login-card .password-field input,.reauth-panel .password-field input{width:100%;margin:0;padding:15px 84px 15px 15px;border:1px solid var(--soi-sand);border-radius:var(--radius-input);background:var(--soi-surface);color:var(--soi-umber);font-size:16px;transition:border-color var(--duration-fast)}
+.login-card .password-field input:focus,.reauth-panel .password-field input:focus{border-color:var(--soi-terracotta)}
 .password-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);min-height:44px;padding:8px 14px;border:0;border-radius:var(--radius-chip);background:transparent;color:var(--soi-terracotta);font:600 11px var(--sans);letter-spacing:.3px;transition:background var(--duration-fast)}
 .password-toggle:hover{background:var(--soi-terracotta-tint)}
 .login-error{min-height:16px;margin:-12px 0 16px;font:11px var(--mono);color:var(--error)}
@@ -99,6 +115,7 @@ kbd{padding:2px 6px;border:1px solid var(--soi-sand-deep);border-bottom-width:2p
 /* ghost / text buttons */
 .refresh-link,.review-skip,.review-zoom button{display:inline-flex;align-items:center;min-height:44px;padding:10px 12px;border:0;border-radius:var(--radius-chip);background:transparent;color:var(--soi-terracotta);font:600 11px var(--sans);transition:background var(--duration-fast),color var(--duration-fast)}
 .refresh-link{text-decoration:underline;text-underline-offset:3px}
+#undoReviewBtn kbd{padding:1px 5px;font-size:11px;line-height:1.2}   /* the shortcut rides inside the button; disabled state dims it with the button */
 .refresh-link:hover,.review-skip:hover,.review-zoom button:hover{background:var(--soi-sand);color:var(--soi-umber)}
 
 /* ── Tabs ─────────────────────────────────────────────────────────────── */
@@ -112,7 +129,7 @@ kbd{padding:2px 6px;border:1px solid var(--soi-sand-deep);border-bottom-width:2p
 
 /* ── Headings, notices & section chrome ───────────────────────────────── */
 .studio-heading{display:flex;justify-content:space-between;align-items:center;gap:25px;margin-bottom:36px}
-.studio-heading .eyebrow{font:9px var(--mono);letter-spacing:1.3px;color:var(--soi-slate-deep)}
+.studio-heading .eyebrow{font:11px var(--mono);letter-spacing:1.3px;color:var(--soi-slate-deep)}
 .studio-heading h1{margin-top:13px;font:500 32px/1.1 var(--display);letter-spacing:-.01em}
 .section-title{margin-bottom:6px;font:500 26px/1.15 var(--display);letter-spacing:-.01em}
 .section-sub{max-width:620px;margin-bottom:28px;font-size:13px;line-height:1.8;color:var(--soi-umber-soft)}
@@ -128,11 +145,27 @@ kbd{padding:2px 6px;border:1px solid var(--soi-sand-deep);border-bottom-width:2p
 /* ── Form fields ──────────────────────────────────────────────────────── */
 .field-group{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:20px}
 .field{display:flex;flex-direction:column;gap:6px}
-.field label{font:10px var(--mono);text-transform:uppercase;letter-spacing:1px;color:var(--soi-umber-soft)}
+.field label{font:11px var(--mono);text-transform:uppercase;letter-spacing:1px;color:var(--soi-umber-soft)}
 .field input,.field select{width:100%;min-height:48px;padding:13px;border:1px solid var(--soi-sand);border-radius:var(--radius-input);background:var(--soi-surface);color:var(--soi-umber);font-size:16px;transition:border-color var(--duration-fast)}
 .field input:focus,.field select:focus{border-color:var(--soi-terracotta)}
 #editSessionForm .field{margin-bottom:14px}
 #editSessionForm .publish-btn{width:100%;margin-top:6px}
+/* Session conditions: a closed <details> on the create form (admin.js opens it when EXIF has a suggestion),
+   a plain fieldset in the edit modal. Both reuse .field; three columns on desktop, two at ≤700, one at ≤480. */
+.conditions{margin:0 0 20px;border:1px solid var(--soi-sand);border-radius:var(--radius-btn);background:var(--soi-surface)}
+.conditions>summary{display:flex;align-items:center;gap:10px;min-height:48px;padding:12px 16px;cursor:pointer;list-style:none;font:600 12px var(--sans);color:var(--soi-umber)}
+.conditions>summary::-webkit-details-marker{display:none}
+.conditions>summary::before{content:'';width:8px;height:8px;border-right:2px solid var(--soi-terracotta);border-bottom:2px solid var(--soi-terracotta);transform:rotate(-45deg);transition:transform var(--duration-fast)}
+.conditions[open]>summary::before{transform:rotate(45deg)}
+.conditions>summary small,.conditions-fields legend small{font:11px var(--mono);letter-spacing:.5px;text-transform:uppercase;color:var(--soi-umber-soft)}
+.conditions .field-group{padding:0 16px 16px;margin-bottom:0}
+.field-group--3{grid-template-columns:repeat(3,1fr)}
+.conditions-fields{margin:4px 0 14px;padding:0;border:0}
+.conditions-fields legend{margin-bottom:10px;font:600 12px var(--sans)}
+.conditions-fields .field-group{gap:12px}
+.conditions-fields .field{margin-bottom:0}
+/* EXIF pre-fill line ("Shot 06:41–08:05 on a Canon EOS R6"): a quiet status, never a warning */
+.exif-hint{margin:0 16px 12px;padding:10px 12px;border-left:3px solid var(--soi-slate-deep);border-radius:0 var(--radius-input) var(--radius-input) 0;background:var(--soi-slate-tint);font:12px/1.6 var(--sans);color:var(--soi-umber)}
 
 /* ── Drop zone: sand + faint wave-crest stamp pattern, terracotta tint on hover/drag ── */
 .drop-zone{position:relative;margin-bottom:20px;padding:35px 25px;text-align:center;cursor:pointer;border:1.5px dashed var(--soi-ochre);border-radius:var(--radius-organic);background-color:var(--soi-sand);background-image:url(soi-stamps.svg#pattern-wave);background-size:120px 60px;background-blend-mode:multiply;transition:border-color var(--duration-fast),background-color var(--duration-fast)}
@@ -146,21 +179,30 @@ kbd{padding:2px 6px;border:1px solid var(--soi-sand-deep);border-bottom-width:2p
 .progress-wrap{margin-bottom:16px}
 .progress-bar-track{height:6px;margin-bottom:8px;border-radius:3px;background:var(--soi-sand);overflow:hidden}
 .progress-bar-fill{width:0%;height:100%;border-radius:3px;background:linear-gradient(90deg,var(--soi-slate-deep),var(--soi-terracotta));transition:width .3s ease}
-.progress-meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;font:10px var(--mono);color:var(--soi-umber-soft)}
+.progress-meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;font:11px var(--mono);color:var(--soi-umber-soft)}
+#progressCount,#moreProgressCount{font-weight:600;color:var(--soi-umber)}
+#progressCount:empty,#progressSpeed:empty,#progressEta:empty,#moreProgressCount:empty,#moreProgressSpeed:empty,#moreProgressEta:empty{display:none}
 #cancelUploadBtn{margin-left:auto}
 .upload-status{display:none;margin-bottom:20px;padding:10px 14px;border:1px solid var(--soi-sand);border-radius:var(--radius-input);background:var(--soi-surface);font:12px/1.7 var(--sans)}
 .upload-status.visible{display:block}
-.upload-status[data-kind="warning"]{background:var(--warning-bg);color:var(--warning);border-color:#E3D3A8}
+.upload-status[data-kind="warning"]{background:var(--warning-bg);color:var(--soi-ochre-ink);border-color:#E3D3A8;border-left:4px solid var(--soi-ochre-deep)}
+/* Sign in again mid-batch (#reauthPanel): an ochre notice with the login field inside it */
+.reauth-panel{margin:4px 0 20px;padding:20px 22px;border:1px solid #E3D3A8;border-left:4px solid var(--soi-ochre-deep);border-radius:var(--radius-btn);background:var(--warning-bg)}
+.reauth-panel h3{font:500 20px/1.2 var(--display);letter-spacing:-.01em}
+.reauth-panel p{margin:8px 0 16px;font-size:13px;line-height:1.7;color:var(--soi-umber-soft)}
+.reauth-panel .password-field{margin-bottom:12px}
+.reauth-panel .login-error{margin:-4px 0 10px}
+.reauth-panel .publish-btn{margin-top:0}
 
 /* ── File queue & live per-photo rows ─────────────────────────────────── */
 .file-queue,.more-photos{margin:20px 0;padding:16px;background:var(--soi-surface);border:1px solid var(--soi-sand);border-radius:var(--radius-card);box-shadow:var(--shadow-card)}
 .file-queue-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;font-size:12px}
-.file-queue small{color:var(--soi-umber-soft);white-space:nowrap}
+.file-queue small,.photo-row-name small{font-size:11px;color:var(--soi-umber-soft);white-space:nowrap}
 .file-queue button,.photo-row button{min-height:44px;min-width:64px;padding:8px 12px;border-radius:var(--radius-chip);background:transparent;color:var(--soi-terracotta-deep);font:600 11px var(--sans);transition:background var(--duration-fast)}
 .file-queue button:hover,.photo-row button:hover{background:var(--soi-terracotta-tint)}
 .file-queue[data-uploading] .photo-row button,.file-queue[data-finished] .photo-row button{display:none}
 .photo-list{list-style:none;margin:0;padding:0;max-height:260px;overflow:auto}
-.photo-row{display:flex;align-items:center;gap:12px;padding:8px 0;border-top:1px solid var(--soi-sand);font-size:11px;transition:opacity var(--duration-base)}
+.photo-row{display:flex;align-items:center;gap:12px;padding:8px 0;border-top:1px solid var(--soi-sand);font-size:11px;transition:opacity var(--duration-base);content-visibility:auto;contain-intrinsic-size:auto 63px}   /* rows out of the list's scroll view skip layout and paint; 63px = 8 + 46 + 8 + 1px rule */
 .photo-row:first-child{border-top:0}
 .photo-row[data-state="skipped"]{opacity:.5}
 .photo-row-thumb{position:relative;flex:none;width:46px;height:46px;border-radius:6px;background:var(--soi-sand);overflow:hidden}
@@ -205,7 +247,7 @@ kbd{padding:2px 6px;border:1px solid var(--soi-sand-deep);border-bottom-width:2p
 .metrics-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:28px}
 #tab-verify .metrics-grid{grid-template-columns:repeat(3,1fr);margin-bottom:24px}
 .metric-card{display:flex;flex-direction:column;gap:4px;padding:22px;background:var(--soi-surface);border:1px solid var(--soi-sand);border-radius:var(--radius-organic);box-shadow:var(--shadow-card)}
-.metric-card label{font:9px var(--mono);text-transform:uppercase;letter-spacing:1px;color:var(--soi-umber-soft)}
+.metric-card label{font:11px var(--mono);text-transform:uppercase;letter-spacing:1px;color:var(--soi-umber-soft)}
 .metric-card .value{margin-top:8px;font:500 30px/1 var(--display);color:var(--soi-terracotta)}
 #verifyConfirmed,#linkConfirmed{color:var(--success)}
 #verifyRejected,#linkRejected{color:var(--soi-umber-soft)}
@@ -216,20 +258,38 @@ kbd{padding:2px 6px;border:1px solid var(--soi-sand-deep);border-bottom-width:2p
 .d-card-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:20px;margin-bottom:14px}
 .d-card-head>div{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .d-card-title{font:600 18px/1.3 var(--sans)}
-.d-card-status.draft{border-color:var(--soi-coral);background:var(--soi-coral-tint);color:var(--soi-coral-deep)}
+.d-card-status.draft{border-color:var(--soi-coral);background:var(--soi-coral-tint);color:var(--soi-coral-ink)}
 .d-card-status.archived{border-color:var(--soi-sand-deep);background:var(--soi-linen);color:var(--soi-umber-soft)}
 .d-card-stats{display:flex;flex-wrap:wrap;align-items:center;gap:20px}
 .d-card-stats>div{display:flex;flex-direction:column;gap:2px}
-.d-card-stats span{font:9px var(--mono);text-transform:uppercase;letter-spacing:1px;color:var(--soi-umber-soft)}
+.d-card-stats span{font:11px var(--mono);text-transform:uppercase;letter-spacing:1px;color:var(--soi-umber-soft)}
 .d-card-stats strong{font-size:18px;font-weight:700;color:var(--soi-umber)}
 .d-card-stats .spacer{flex:1}
-/* indexing badges: shared chip from soi-tokens.css (.processing / .warning live there) */
+/* indexing badges: shared chip from soi-tokens.css (.processing / .warning live there); the slate pair gets the AA ink */
+.indexing-badge.processing,.d-card-status.published,.chip--slate{color:var(--soi-slate-ink)}   /* .chip--slate in soi-tokens.css is slate-deep (4.44:1); the studio's chips get the AA ink */
 .indexing-badge.done{border-color:var(--success);background:var(--success-bg);color:var(--success)}
 .indexing-badge.empty{border-color:var(--soi-sand-deep);background:var(--soi-linen);color:var(--soi-umber-soft)}
 .pulse-dot{width:7px;height:7px;border-radius:50%;background:var(--soi-terracotta);animation:pulseAnimation 1.5s infinite}
 @keyframes pulseAnimation{0%{transform:scale(.95);box-shadow:0 0 0 0 color-mix(in srgb,var(--soi-terracotta) 70%,transparent)}70%{transform:scale(1.15);box-shadow:0 0 0 5px transparent}100%{transform:scale(.95);box-shadow:0 0 0 0 transparent}}
 .card-progress-track{height:5px;margin:14px 0 2px;border-radius:3px;background:var(--soi-sand);overflow:hidden}
 .card-progress-fill{height:100%;border-radius:3px;background:linear-gradient(90deg,var(--soi-slate-deep),var(--soi-terracotta));transition:width .4s ease}
+/* Money strip (admin.js paintMoneyStrips, from /api/admin/stats): one linen band per card reading
+   "12 searches · 3 unlocks · ₹2,100" with lining, tabular figures so the columns line up card to
+   card; .is-muted is the "No searches yet" state. Hidden ([hidden]) while the endpoint is missing. */
+.d-card-money{display:flex;align-items:center;gap:10px;margin:14px 0 0;padding:8px 12px;border:1px solid var(--soi-sand);border-radius:var(--radius-input);background:var(--soi-linen);color:var(--soi-umber);font:600 12px/1.4 var(--sans);font-variant-numeric:lining-nums tabular-nums;overflow-wrap:anywhere}
+.d-card-money::before{content:'₹';flex:none;display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--soi-slate-tint);color:var(--soi-slate-ink);font:700 12px/1 var(--sans)}
+.d-card-money.is-muted{color:var(--soi-umber-soft);font-weight:500}
+.d-card-money.is-muted::before{background:var(--soi-sand);color:var(--soi-umber-soft)}
+/* Indexing observability (admin.js formatIndexingLine, from the dashboard's `indexing` object): "42 queued · 3 running
+   · ETA 6 min" under the progress bar and a grouped failure list ("3 × Face service timed out"). Both absent on an
+   older Worker, where the badge alone carries the state. */
+.d-card-indexing{margin:6px 0 0;font:11px var(--mono);letter-spacing:.2px;color:var(--soi-umber-soft);font-variant-numeric:tabular-nums}
+.d-card-failures{margin:8px 0 0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:6px}
+.d-card-failures li{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:4px 10px;border:1px solid var(--soi-terracotta);border-radius:var(--radius-chip);background:var(--soi-terracotta-tint);color:var(--soi-terracotta-deep);font:600 11px/1.3 var(--sans)}
+.d-card-failures b{font-weight:800}
+/* Conditions on a card: "Mulki river mouth · 3.5 ft · offshore · rising · Ankith · next drop Fri 07:00" */
+.d-card-conditions{margin:10px 0 0;font:12px/1.6 var(--sans);color:var(--soi-umber-soft);overflow-wrap:anywhere}
+.d-card-conditions b{font-weight:600;color:var(--soi-umber)}
 .action-group{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px}
 
 /* ── Session card "More" menu: <details class="card-more"> inside .action-group ──
@@ -240,6 +300,8 @@ kbd{padding:2px 6px;border:1px solid var(--soi-sand-deep);border-bottom-width:2p
 .card-more>summary::-webkit-details-marker{display:none}
 .card-more>summary::marker{content:''}
 .card-more-menu{position:absolute;top:calc(100% + 6px);left:0;z-index:20;display:grid;gap:2px;min-width:200px;padding:6px;background:var(--soi-surface);border:1px solid var(--soi-sand);border-radius:var(--radius-btn);box-shadow:var(--shadow-float)}
+.card-more.is-up>.card-more-menu{top:auto;bottom:calc(100% + 6px)}   /* admin.js measures on open: flip up / right-align so the menu stays on screen */
+.card-more.is-left>.card-more-menu{left:auto;right:0}
 .card-more-menu .btn-sm,.card-more-menu .delete-btn{width:100%;justify-content:flex-start;border-color:transparent;border-radius:8px;background:transparent}
 .card-more-menu .btn-sm:hover{border-color:transparent;background:var(--soi-sand)}
 .card-more-menu .delete-btn:hover{border-color:transparent;background:var(--soi-terracotta-tint)}
@@ -262,8 +324,32 @@ kbd{padding:2px 6px;border:1px solid var(--soi-sand-deep);border-bottom-width:2p
 .admin-photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px;align-items:start}
 .cover-hint{grid-column:1/-1;margin-bottom:4px;padding:12px 14px;border-left:3px solid var(--soi-terracotta);border-radius:0 var(--radius-input) var(--radius-input) 0;background:var(--soi-sand);font:12px/1.7 var(--sans);color:var(--soi-umber-soft)}
 .photo-card{position:relative;display:flex;flex-direction:column;background:var(--soi-surface);border:1px solid var(--soi-sand);border-radius:var(--radius-organic-sm);overflow:hidden}
-.photo-card img{display:block;width:100%;aspect-ratio:1;object-fit:cover;background:var(--soi-sand)}
-.photo-card .photo-badge{position:absolute;top:52px;left:6px;min-height:24px;padding:3px 8px;font-size:10px}
+/* Uncropped tiles: admin.js sets --tile-aspect from the stored width/height (migration 0012); 4:3 when unknown */
+.photo-card img{display:block;width:100%;aspect-ratio:var(--tile-aspect,4/3);object-fit:cover;background:var(--soi-sand)}
+.photo-card .photo-badge{position:absolute;top:52px;left:6px;min-height:24px;padding:3px 8px;font-size:11px}
+/* Bulk select: a 44px checkbox target in the top-right of every tile — always visible on touch screens, revealed
+   on hover/focus/selection on pointer devices; .is-selected outlines the tile in slate. */
+.photo-select{position:absolute;top:0;right:0;z-index:2;display:grid;place-items:center;width:44px;height:44px;margin:0;cursor:pointer}
+.photo-select input{width:22px;height:22px;margin:0;accent-color:var(--soi-slate-deep);cursor:pointer;background:var(--soi-surface);border-radius:6px;box-shadow:0 0 0 2px var(--soi-surface)}
+.photo-card.is-selected{border-color:var(--soi-slate-deep);box-shadow:0 0 0 2px var(--soi-slate-deep)}
+.photo-card.is-selected img{opacity:.85}
+@media(hover:hover){.photo-card .photo-select{opacity:0}.photo-card:hover .photo-select,.photo-card:focus-within .photo-select,.photo-card.is-selected .photo-select,.admin-photo-grid.has-selection .photo-select{opacity:1}}
+.admin-photo-grid.has-selection .photo-delete-btn{display:none}   /* one destructive control at a time: the bar owns Delete while a selection exists */
+.gallery-tools{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:14px;font:600 12px var(--sans);color:var(--soi-umber-soft)}
+.gallery-tools span{margin-right:auto}
+/* The action bar lives outside the scrolling body so it stays put; sticky as a belt-and-braces on old layouts */
+.modal-footer{position:sticky;bottom:0;z-index:3;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 24px;border-top:1px solid var(--soi-sand);background:var(--soi-linen)}
+.bulk-bar strong{margin-right:auto;font:600 12px var(--sans);font-variant-numeric:tabular-nums}
+.bulk-progress{flex-basis:100%;margin:2px 0 0;font:11px/1.6 var(--sans);color:var(--soi-umber-soft)}
+.bulk-progress:empty{display:none}
+.bulk-progress[data-kind="error"]{color:var(--error)}
+.cover-picker-actions p{flex:1 1 220px;margin:0;font:12px/1.6 var(--sans);color:var(--soi-umber-soft)}
+/* Cover-picker mode: tiles are one big choice, the per-tile buttons step aside */
+#photoGalleryModal[data-mode="cover"] .photo-cover-btn,#photoGalleryModal[data-mode="cover"] .photo-delete-btn,#photoGalleryModal[data-mode="cover"] .photo-select,#photoGalleryModal[data-mode="cover"] .gallery-tools{display:none}
+#photoGalleryModal[data-mode="cover"] .photo-card{cursor:pointer}
+#photoGalleryModal[data-mode="cover"] .photo-pick{position:absolute;inset:0;z-index:2;width:100%;height:100%;border:0;background:transparent;color:transparent;font-size:0}
+#photoGalleryModal[data-mode="cover"] .photo-pick:focus-visible{outline:3px solid var(--soi-terracotta);outline-offset:-3px}
+#photoGalleryModal[data-mode="cover"] .photo-card.is-cover::after{content:'★ Cover';position:absolute;top:6px;left:6px;z-index:3;padding:6px 10px;border-radius:8px;background:var(--soi-terracotta);color:#fff;font:600 11px var(--sans)}
 .photo-cover-btn,.photo-delete-btn{position:absolute;top:6px;min-height:40px;min-width:44px;padding:6px 10px;border:0;border-radius:8px;color:#fff;font:600 11px var(--sans);transition:background var(--duration-fast),opacity var(--duration-fast)}
 .photo-cover-btn{left:6px;background:color-mix(in srgb,var(--soi-umber) 85%,transparent)}
 .photo-cover-btn:hover,.photo-card.is-cover .photo-cover-btn{background:var(--soi-terracotta)}
@@ -280,21 +366,31 @@ kbd{padding:2px 6px;border:1px solid var(--soi-sand-deep);border-bottom-width:2p
 /* ── Review queues: face pairs, burst & appearance links ──────────────── */
 .verify-grid{display:grid;grid-template-columns:1fr;gap:25px}
 /* Queue is server-sorted by session; this marks where one session's run of cards starts. */
-.review-session-divider{padding-bottom:10px;border-bottom:1px solid var(--soi-sand);font:600 11px var(--mono);letter-spacing:1.5px;text-transform:uppercase;color:var(--soi-ochre)}
+.review-session-divider{padding-bottom:10px;border-bottom:1px solid var(--soi-sand);font:600 11px var(--mono);letter-spacing:1.5px;text-transform:uppercase;color:var(--soi-ochre-ink)}   /* ochre-ink: 5.9:1 on canvas (plain ochre was 2.6:1) */
 .verify-card{display:flex;flex-direction:column;gap:16px;padding:28px;background:var(--soi-surface);border:1px solid var(--soi-sand);border-radius:var(--radius-organic);box-shadow:var(--shadow-card);transition:box-shadow var(--duration-base)}
 .verify-card.is-active{outline:2px solid var(--soi-terracotta);outline-offset:4px} /* the card Y / N / S will act on */
 .review-heading{display:flex;justify-content:space-between;align-items:center;gap:20px}
-.review-heading .eyebrow{font:8px var(--mono);letter-spacing:1px;color:var(--soi-slate-deep)}
+.review-heading .eyebrow{font:11px var(--mono);letter-spacing:1px;color:var(--soi-slate-deep)}
 .review-heading h3{margin:9px 0;font:500 23px/1.15 var(--display);letter-spacing:-.01em}
 .review-heading p{font-size:12px;color:var(--soi-umber-soft)}
-.review-score{padding:12px;border-radius:var(--radius-input);background:var(--soi-slate-tint);color:var(--soi-slate-deep);font:11px var(--mono);white-space:nowrap}
-.review-score small{display:block;margin-top:5px;font:9px var(--sans);color:var(--soi-umber-soft)}
+.review-score{min-width:150px;padding:12px;border-radius:var(--radius-input);background:var(--soi-slate-tint);color:var(--soi-slate-ink);font:600 11px var(--mono);white-space:nowrap}
+.review-score small{display:block;margin-top:5px;font:400 11px var(--sans);color:var(--soi-umber-soft)}
+/* Confidence bar (role="meter", admin.js confidenceBand): the fill colour follows the band — under 50% terracotta
+   (probably different), 50–74% ochre (borderline), 75%+ green (probably the same). Text carries the number too. */
+.review-meter{display:block;position:relative;height:8px;margin-top:8px;border-radius:4px;background:var(--soi-sand);overflow:hidden}
+.review-meter i{display:block;height:100%;border-radius:4px;background:var(--soi-ochre-deep);transition:width var(--duration-base)}
+.review-meter[data-band="low"] i{background:var(--soi-terracotta)}
+.review-meter[data-band="high"] i{background:var(--success)}
+/* The whole frame beside each crop, with the face box drawn on it, so the crew can see the context of a crop */
+.review-full{margin-top:8px}
+.review-full canvas,.review-full img{display:block;width:auto;max-width:100%;height:auto;max-height:240px;margin:0 auto;border:1px solid var(--soi-sand);border-radius:var(--radius-input);background:var(--soi-sand)}   /* a portrait frame must not tower over the crop */
+.review-full figcaption,.review-full-label{margin:0 0 6px;font:11px var(--mono);letter-spacing:1px;color:var(--soi-umber-soft)}
 /* cap the face crops so two 640px canvases don't fill the whole viewport */
 .verify-faces{display:grid;grid-template-columns:1fr 1fr;justify-items:center;gap:24px;margin:26px 0 15px}
 .review-face{width:100%;max-width:380px;min-width:0;margin:0;justify-self:center}
-.review-face figcaption{margin-bottom:10px;font:9px var(--mono);letter-spacing:1.8px;color:var(--soi-umber-soft)}
+.review-face figcaption{margin-bottom:10px;font:11px var(--mono);letter-spacing:1.8px;color:var(--soi-umber-soft)}
 .face-crop-canvas{display:block;width:100%;height:auto;aspect-ratio:1;border:1px solid var(--soi-sand);border-radius:var(--radius-input);background:var(--soi-sand)}
-.review-face p{margin-top:9px;font:10px var(--sans);color:var(--soi-umber-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.review-face p{margin-top:9px;font:11px var(--sans);color:var(--soi-umber-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* face loading stays visible without shifting the comparison layout */
 .review-image-frame{position:relative;isolation:isolate}
 .review-image-loader{position:absolute;inset:0;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;border:1px solid var(--soi-sand);border-radius:var(--radius-input);background:var(--soi-linen);color:var(--soi-umber-soft);font:11px var(--sans)}
@@ -306,12 +402,12 @@ kbd{padding:2px 6px;border:1px solid var(--soi-sand-deep);border-bottom-width:2p
 .review-zoom{display:flex;align-items:center;gap:15px;margin:20px 0}
 .review-zoom label{display:flex;flex:1;align-items:center;gap:15px;font-size:11px}
 .review-zoom input{flex:1;min-width:50px;accent-color:var(--soi-terracotta)}
-.review-zoom output{width:32px;font:10px var(--mono)}
+.review-zoom output{width:36px;font:11px var(--mono)}
 .review-load-status{margin:14px 0;font:11px/1.6 var(--sans);color:var(--soi-umber-soft)}
 /* burst & appearance fallback links compare whole photos, not isolated face crops */
 .link-photo-img{display:block;width:100%;aspect-ratio:4/3;object-fit:cover;border:1px solid var(--soi-sand);border-radius:var(--radius-input);background:var(--soi-sand)}
 .link-photo-error .link-photo-img{opacity:.35}
-.link-photo-error::after{content:'Photo could not load';display:block;margin-top:6px;font:10px var(--sans);color:var(--soi-terracotta-deep)}
+.link-photo-error::after{content:'Photo could not load';display:block;margin-top:6px;font:11px var(--sans);color:var(--soi-terracotta-deep)}
 .verify-actions{display:flex;flex-wrap:wrap;gap:10px}
 .confirm-btn,.reject-btn{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:13px 22px;border:1px solid var(--soi-terracotta);border-radius:var(--radius-organic-sm);font:600 12px var(--sans);transition:background var(--duration-fast),border-color var(--duration-fast),box-shadow var(--duration-fast),transform var(--duration-fast)}
 .confirm-btn{background:var(--soi-terracotta);color:#fff;box-shadow:2px 2px 0 var(--stamp-ink)}
@@ -325,15 +421,70 @@ kbd{padding:2px 6px;border:1px solid var(--soi-sand-deep);border-bottom-width:2p
 /* ── Confirm dialog ───────────────────────────────────────────────────── */
 .confirm-copy{margin-bottom:18px;font-size:13px;line-height:1.7;color:var(--soi-umber)}
 .confirm-copy strong{color:var(--soi-terracotta-deep)}
-.confirm-typed{margin-bottom:18px}
-.confirm-typed label{font:10px var(--mono);text-transform:uppercase;letter-spacing:1px;color:var(--soi-umber-soft)}
+.confirm-typed,#confirmChoiceWrap,#confirmReasonWrap{margin-bottom:18px}
+.confirm-typed label,#confirmChoiceWrap label,#confirmReasonWrap label{font:11px var(--mono);text-transform:uppercase;letter-spacing:1px;color:var(--soi-umber-soft)}
+
+/* ── Money tab: funnel table, settlements, unreconciled ───────────────── */
+.money-metrics{grid-template-columns:repeat(3,1fr)}
+.metric-card small{font:11px/1.5 var(--sans);color:var(--soi-umber-soft)}
+.metric-card small:empty{display:none}
+.section-title--sm{font-size:22px}
+.table-wrap{margin-bottom:28px;border:1px solid var(--soi-sand);border-radius:var(--radius-card);background:var(--soi-surface);box-shadow:var(--shadow-card);overflow-x:auto}
+.table-wrap:focus-visible,.guest-saw-scroll:focus-visible{outline:3px solid var(--soi-terracotta);outline-offset:2px}   /* scrollable regions are keyboard-focusable (axe scrollable-region-focusable) */
+.money-table{width:100%;border-collapse:collapse;font:12px/1.5 var(--sans);font-variant-numeric:lining-nums tabular-nums}
+.money-table caption{padding:14px 16px 6px;text-align:left;font:11px var(--mono);letter-spacing:1.5px;text-transform:uppercase;color:var(--soi-ochre-ink)}
+.money-table th,.money-table td{padding:11px 14px;border-top:1px solid var(--soi-sand);text-align:left;vertical-align:top;white-space:nowrap}
+.money-table th{font:600 11px var(--mono);letter-spacing:.8px;text-transform:uppercase;color:var(--soi-umber-soft);background:var(--soi-linen)}
+.money-table .num{text-align:right}
+.money-table td:first-child{white-space:normal;min-width:140px;font-weight:600}
+.money-table tr.total td{font-weight:700;background:var(--soi-linen)}
+.money-table .is-muted{color:var(--soi-umber-soft)}
+.money-table .rate{display:block;margin-top:2px;font:11px var(--mono);color:var(--soi-umber-soft)}
+.range-form{display:flex;flex-wrap:wrap;align-items:end;gap:10px}
+.range-form label{display:flex;flex-direction:column;gap:6px;font:11px var(--mono);text-transform:uppercase;letter-spacing:1px;color:var(--soi-umber-soft)}
+.range-form input{min-height:44px;padding:10px 12px;border:1px solid var(--soi-sand);border-radius:var(--radius-input);background:var(--soi-surface);color:var(--soi-umber);font-size:16px}
+.settlements{margin-top:12px}
+.unreconciled{margin:-14px 0 28px;padding:14px 18px;border:1px solid #E3D3A8;border-left:4px solid var(--soi-ochre-deep);border-radius:var(--radius-btn);background:var(--warning-bg);font:12px/1.7 var(--sans);color:var(--soi-ochre-ink)}
+.unreconciled strong{color:var(--soi-umber)}
+.unreconciled ul{margin:6px 0 0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:8px}
+.unreconciled button{display:inline-flex;align-items:center;min-height:44px;padding:8px 12px;border:1px solid var(--soi-ochre);border-radius:var(--radius-chip);background:var(--soi-surface);color:var(--soi-umber);font:600 11px var(--mono)}
+.unreconciled button:hover{background:var(--soi-sand)}
+
+/* ── Support tab: lookup form, result cards, "what the guest saw" ─────── */
+.support-form{display:grid;grid-template-columns:1fr auto;grid-template-areas:"query button" "detected detected";gap:8px 10px;align-items:center;margin-bottom:20px}
+.support-form input{grid-area:query;min-height:48px;padding:13px 14px;border:1px solid var(--soi-sand);border-radius:var(--radius-input);background:var(--soi-surface);color:var(--soi-umber);font-size:16px}
+.support-form input:focus{border-color:var(--soi-terracotta)}
+.support-form button{grid-area:button;min-height:48px}
+.support-detected{grid-area:detected;min-height:16px;font:11px var(--mono);letter-spacing:.5px;text-transform:uppercase;color:var(--soi-slate-ink)}
+.support-results{display:grid;gap:14px;min-width:0}
+.support-card{min-width:0;padding:20px 24px;background:var(--soi-surface);border:1px solid var(--soi-sand);border-radius:var(--radius-organic);box-shadow:var(--shadow-card)}   /* min-width:0 — the thumbnail strip scrolls inside the card instead of widening the page */
+.support-card h3{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:12px;font:600 16px/1.3 var(--sans)}
+.support-card h3 .chip{font-weight:600}
+.support-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px 20px;margin-bottom:14px}
+.support-facts div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.support-facts span{font:11px var(--mono);text-transform:uppercase;letter-spacing:1px;color:var(--soi-umber-soft)}
+.support-facts strong{font-size:13px;font-weight:600;color:var(--soi-umber);overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.support-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.support-link{margin:12px 0 0;padding:10px 12px;border:1px solid var(--soi-sand);border-radius:var(--radius-input);background:var(--soi-linen);font:12px/1.6 var(--mono);color:var(--soi-umber);overflow-wrap:anywhere;user-select:all}
+.support-link small{display:block;font:11px var(--sans);color:var(--soi-umber-soft)}
+.guest-saw{margin-top:14px}
+.guest-saw p{margin-bottom:8px;font:11px var(--mono);letter-spacing:1px;text-transform:uppercase;color:var(--soi-umber-soft)}
+.guest-saw-scroll{overflow-x:auto;scrollbar-width:thin}   /* the scroller wraps the list so the <ul>/<li> semantics stay intact */
+.guest-saw ul{display:flex;gap:8px;margin:0;padding:4px 0 8px;list-style:none;width:max-content}
+.guest-saw li{position:relative;flex:none;width:96px}
+.guest-saw img{display:block;width:96px;height:72px;object-fit:cover;border:1px solid var(--soi-sand);border-radius:8px;background:var(--soi-sand)}
+.guest-saw li.is-hidden img{opacity:.4}
+.guest-saw li.is-hidden::after{content:'Hidden';position:absolute;left:6px;bottom:6px;padding:2px 6px;border-radius:6px;background:var(--soi-umber);color:#fff;font:600 11px var(--sans)}
+.support-notify{margin:0;padding-left:18px;font:13px/1.8 var(--sans);color:var(--soi-umber)}
+.support-card code{font:600 12px var(--mono);color:var(--soi-terracotta-deep)}
+.support-empty{padding:32px 20px;text-align:center;font:12px var(--mono);color:var(--soi-umber-soft)}
 
 /* ── Responsive ───────────────────────────────────────────────────────── */
 @media(max-width:700px){
 .admin-body{padding:28px 5% 60px}
 .topbar{padding:16px 5%}
 .topbar-right{gap:12px}
-.back-link,.sign-out-btn{font-size:9px}
+.back-link,.sign-out-btn{font-size:11px;padding-left:12px;padding-right:12px}
 .studio-heading{flex-direction:column;align-items:flex-start;gap:15px;margin-bottom:28px}
 .studio-heading h1{font-size:26px}
 .login-screen{grid-template-columns:1fr;min-height:0;padding:0}
@@ -342,9 +493,13 @@ kbd{padding:2px 6px;border:1px solid var(--soi-sand-deep);border-bottom-width:2p
 .login-story h1{font-size:28px}
 .stamp-corner{top:16px;right:16px;width:56px;height:56px}
 .login-card{padding:32px 25px;border-radius:0 0 var(--radius-card) var(--radius-card)}
-.tabs{gap:3px}
-.tab-btn{padding:12px 5px}
-.metrics-grid,#tab-verify .metrics-grid{grid-template-columns:repeat(2,1fr)}
+.tabs{gap:3px;flex-wrap:wrap}
+.tab-btn{flex:1 1 30%;padding:12px 5px}   /* five tabs: three + two rows on phones, labels stay 13px */
+.field-group--3{grid-template-columns:1fr 1fr}
+.metrics-grid,#tab-verify .metrics-grid,.money-metrics{grid-template-columns:repeat(2,1fr)}
+.modal-footer{padding:10px 16px}
+.support-form{grid-template-columns:1fr;grid-template-areas:"query" "detected" "button"}
+.support-card{padding:16px}
 .metric-card{padding:16px}
 .metric-card .value{font-size:26px}
 .dashboard-header{flex-direction:column;align-items:flex-start;gap:15px}
@@ -352,21 +507,26 @@ kbd{padding:2px 6px;border:1px solid var(--soi-sand-deep);border-bottom-width:2p
 .verify-card{padding:18px}
 .review-heading{flex-direction:column;align-items:flex-start;gap:12px}
 .review-heading h3{font-size:21px}
-.review-score{padding:9px;font-size:10px}
+.review-score{padding:9px}
 .review-score small{display:inline;margin-left:8px}
 .verify-faces{gap:10px}
-.review-zoom label{gap:8px;font-size:10px}
+.review-zoom label{gap:8px}
 .confirm-btn,.reject-btn{padding:12px 15px;font-size:11px}
 .verify-actions .review-skip{margin-left:0}
 }
 @media(max-width:480px){
-.field-group{grid-template-columns:1fr}
+.field-group,.field-group--3{grid-template-columns:1fr}
 .d-card-stats{display:grid;grid-template-columns:1fr 1fr}
 .d-card-stats .spacer{display:none}
+.money-metrics{grid-template-columns:1fr}
+.review-score{min-width:0;width:100%}
 }
-@media(max-width:380px){
-.topbar-brand{font-size:13px}
-.back-link{display:none}
+@media(max-width:480px){
+.topbar{gap:10px}
+.topbar-right{gap:8px}
+.topbar-brand{font-size:14px;letter-spacing:-.3px}
+.topbar-brand img{width:36px;height:36px}
+.back-link{display:none}   /* the brand mark links to the site too */
 }
 
 /* ── Reduced motion ───────────────────────────────────────────────────── */

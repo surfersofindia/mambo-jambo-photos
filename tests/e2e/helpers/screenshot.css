@@ -1,0 +1,4 @@
+/* Applied only while a baseline is captured (toHaveScreenshot stylePath). Rows in the upload queue use
+   content-visibility:auto, so a full-page capture — which resizes the viewport — lays them out mid-shot and the
+   page height moves between the two frames Playwright compares. Rendering them up front costs nothing here. */
+.photo-row { content-visibility: visible !important; contain-intrinsic-size: none !important; }
