@@ -1,6 +1,6 @@
 {
   "name": "mambo-jambo-photo-finder",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "scripts": {
     "dev:api": "wrangler dev",
