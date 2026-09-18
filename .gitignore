@@ -9,3 +9,9 @@ node_modules/
 
 dist/
 .claude/skills/
+.lighthouseci/
+face-api/__pycache__/
+face-api/.pytest_cache/
+test-results/
+playwright-report/
+docs/audit/handoff/shots/

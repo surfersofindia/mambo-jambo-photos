@@ -1,5 +1,6 @@
 {
   "name": "mambo-jambo-photo-finder",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev:api": "wrangler dev",
@@ -8,9 +9,20 @@
     "dev": "node scripts/dev.mjs",
     "test": "node --test tests/*.test.mjs",
     "check": "node --check app.js && node --check admin.js && node --check worker.js && node --check effects.js && node --check nav.js",
-    "build": "node scripts/build.mjs"
+    "build": "node scripts/build.mjs",
+    "images": "node scripts/images.mjs",
+    "lighthouse": "lhci autorun",
+    "e2e": "playwright test",
+    "verify": "npm run check && npm test && npm run build && CI=1 npx wrangler deploy --dry-run && npm run e2e",
+    "backup": "node scripts/backup.mjs",
+    "restore-drill": "node scripts/restore-drill.mjs",
+    "accuracy": "node scripts/accuracy.mjs"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@lhci/cli": "^0.15.1",
+    "@playwright/test": "^1.63.0",
+    "sharp": "^0.35.4",
     "wrangler": "^4.0.0"
   }
 }
