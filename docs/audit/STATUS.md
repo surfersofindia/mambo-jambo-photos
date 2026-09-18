@@ -264,3 +264,39 @@ Done from this machine, in the plan's order, each step verified before the next:
 - If the original `SOI-Fix-Prompt.md` exists elsewhere, share it and the lead will diff it against the reconstruction.
 - All four waves are complete. Next: your deploy go/no-go on the consolidated list above, the alert-sink and cover-privacy decisions, a nominated session for the accuracy run, and the linocut kit.
 - **Privacy decision:** the concurrent session changed the landing-page cover to serve the unwatermarked original (`variant=original`, 6-hour public token, EXIF intact). The program closed the download/funnel abuse but did not revert the choice. Recommend a dedicated EXIF-free cover derivative (reviewer's suggestion) if the original should not be public.
+
+---
+
+## Deploy log — 2026-09-18, v1.0.0 → v1.0.3 (first release under the tagged-release process)
+
+This session established the tagged-release workflow now in force (see the repo root `CLAUDE.md`-equivalent instructions and `CHANGELOG.md`) and used it to cut and ship the first real release. Previously the working tree was uncommitted; `git log` now carries the whole history as reviewable commits.
+
+**Bootstrap:** `chore: repo hygiene before v1.0.0` (untracked the stray `.pyc`, `docs/audit/handoff/shots/` gitignored, `package.json` versioned, `dist/version.json` added to the build + dev server) → `feat: v1.0.0 — the 10/10 program` (one commit, all four audit waves, 159 files, +22 617/−778) → tagged `v0.9.0` (pre-program baseline, `97a6992`) and `v1.0.0`, pushed, GitHub Releases created.
+
+**v1.0.0's CI failed** (first-ever Linux run): `payments.customer_phone` was the last column in `schema.sql`, which trips a real Node 22 `node:sqlite` bug (`ALTER TABLE ... DROP COLUMN` on a table's last column → "incomplete input") that only `tests/worker.test.mjs`'s pre-migration-0015 fixture exercises — not production code. Fixed and shipped as **v1.0.1** (branch → commit → ff-merge → release, per the new process). CI green. Linux Playwright screenshot baselines (52 files) downloaded from that green run and committed, requiring **v1.0.2** to restore the tag-equals-HEAD invariant the deploy process checks.
+
+**Deployed from `v1.0.2`:**
+1. Face service — diffed `face-api/{main.py,requirements.txt,Dockerfile,test_auth.py}` against the live Hugging Face Space (`ankitkotian/mambo-jambo-face-api`) via a throwaway read-only clone: byte-identical, nothing to push.
+2. D1 — `GET /api/health` already showed all seven `migrations` flags true; no migration file newer than what's applied.
+3. Worker — `npm run deploy:api`, version `9148842a-c624-4ca0-b26f-eb5d98f85184`; `GET /api/health?deep=1` → `ok:true`, `face:ok`, all seven migration flags true.
+4. Hostinger — all 56 `dist/` files (including `dist/version.json`, new this release) uploaded per-file over TUS, every `Upload-Offset` verified against file size; cache cleared.
+5. Vercel — `npx vercel deploy --prod --scope mambo-jambo1` (the default scope needed `--scope` explicitly this run; without it the CLI returned "Not authorized" despite `vercel whoami` succeeding).
+
+**Verification of v1.0.2 found a real, pre-existing production bug:** `/admin` returned 404 on Hostinger (200 on the Vercel mirror). `.htaccess` never had a rewrite to `admin.html` — confirmed via full git history — while `vercel.json` always did; only `/admin.html` directly worked on the primary host. Fixed and shipped as **v1.0.3** (`RewriteRule ^admin$ admin.html [L]` under `<IfModule mod_rewrite.c>`), redeployed to both hosts, cache cleared again.
+
+**Final verification, `v1.0.3` (commit `e09eaf5`), both hosts:**
+- `photos.surfersofindia.com/version.json` → `{"version":"1.0.3","commit":"e09eaf5",…}`. `mambo-jambo-photos.vercel.app/version.json` → version correct, **commit shows `"unknown"`** — Vercel's `vercel deploy` build sandbox has no `.git` directory, so `versionInfo()`'s git fallback (deliberately non-throwing, see the bootstrap commit) returns `"unknown"` there. Not fixed this session: fixing it cleanly needs `VERCEL_GIT_COMMIT_SHA` wired in and another release cycle to verify; the primary host (Hostinger) is correct, so this was left as a known, minor, mirror-only gap rather than spending another release on it.
+- Headers on both hosts: `/` and `/sw.js` → `no-cache, must-revalidate`; a hashed `app.<hash>.js` → `public, max-age=31536000, immutable`; `/manifest.webmanifest` → `application/manifest+json`; `assets/fonts/*.woff2` → `font/woff2`, immutable. Live `index.html` references the hashed build.
+- `/admin` → 200 on both hosts (the fix), crew login renders correctly.
+- Screenshots (landing + studio login, 375×812 and 1024×768, both hosts — 8 combinations): zero page errors on every one.
+- Lighthouse against `https://photos.surfersofindia.com/` (mobile, `throttlingMethod: devtools`, 3 runs, Playwright's bundled Chrome for Testing as `CHROME_PATH`): perf 0.95/0.96/0.97, **LCP 2 356/2 343/2 116 ms**, **CLS 0.0000** on all three, **TBT 0 ms** on all three. LCP is still above the 1.8 s local-gate budget — consistent with prior live-host runs (the local gate excludes real CDN/Worker round trips); the lever remains the hero image's time-to-first-byte, not layout or script cost.
+
+**Rollback copy** of the pre-deploy live `index.html`, `admin.html` and `.htaccess` saved to the session scratchpad (not the repo) before the first upload.
+
+### Still needs a dashboard action from you
+- **Cashfree** (production and sandbox): subscribe the webhook to `PAYMENT_SUCCESS_WEBHOOK` and `REFUND_STATUS_WEBHOOK`, confirm the production domain is whitelisted, confirm settlements/recon APIs are enabled, and run one real sandbox payment + refund end to end — none of this has been exercised against the live Cashfree dashboard from any session.
+- **R2 API token** (Object Read & Write, this bucket only) → `wrangler secret put R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY` — direct-to-R2 uploads fall back to streaming without it.
+- **Alert sink** — `ALERT_WEBHOOK_URL` (Slack/Chat/Discord) and/or `RESEND_API_KEY` + `ALERT_EMAIL_TO`; the ops cron logs only until one is set.
+- **GitHub repository secrets** `CLOUDFLARE_API_TOKEN` (D1 Read + R2 Edit) and `CLOUDFLARE_ACCOUNT_ID` for the nightly backup Action; then run it once by hand and the restore drill the day after.
+- **Vercel mirror's `version.json` commit field** shows `"unknown"` (see above) — cosmetic only, low priority.
+- Everything already listed as open above this section (accuracy nomination, linocut kit, cover-privacy decision) is still open.
