@@ -5,6 +5,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Reordered `payments.customer_phone` in `schema.sql` so it is no longer the last column. Node 22's
+  bundled SQLite (used by GitHub Actions CI) mishandles `ALTER TABLE ... DROP COLUMN` on a table's
+  last column, rewriting the schema with a trailing comma ("incomplete input"); Node 26 (this Mac)
+  bundles a newer SQLite without the bug. `tests/worker.test.mjs`'s pre-migration-0015 fixture
+  exercises exactly this by dropping the column to simulate an older database. No migration or
+  runtime code changed — `schema.sql` is fresh-install-only and every query names its columns.
+
 ## [1.0.0] - 2026-09-18
 
 The "10/10 program": a four-wave audit and rebuild covering security, product depth, performance/PWA,

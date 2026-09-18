@@ -76,9 +76,9 @@ CREATE TABLE IF NOT EXISTS payments (
   currency TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'created' CHECK (status IN ('created', 'verified', 'captured', 'failed')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  paid_at TEXT,
   -- Migration 0015: the checkout phone (already sent to Cashfree), so support can look a guest up. Masked in responses.
-  customer_phone TEXT
+  customer_phone TEXT,
+  paid_at TEXT
 );
 CREATE INDEX IF NOT EXISTS payments_by_search ON payments(search_id);
 
