@@ -2,6 +2,12 @@
 # fix or content change is never masked by a stale client-side cache.
 # The service worker (sw.js) is matched by the no-cache js rule above, as it must be; the manifest needs its MIME type.
 AddType application/manifest+json .webmanifest
+# The crew studio's pretty URL. vercel.json carries the same rewrite (/admin -> /admin.html) for the
+# mirror; without this, Hostinger 404s on /admin because there is no admin.html-named directory index.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteRule ^admin$ admin.html [L]
+</IfModule>
 <IfModule mod_headers.c>
   <FilesMatch "\.(html|js|css)$">
     Header set Cache-Control "no-cache, must-revalidate"
