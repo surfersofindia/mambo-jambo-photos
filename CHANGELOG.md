@@ -5,6 +5,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-18
+
 ### Fixed
 - Reordered `payments.customer_phone` in `schema.sql` so it is no longer the last column. Node 22's
   bundled SQLite (used by GitHub Actions CI) mishandles `ALTER TABLE ... DROP COLUMN` on a table's
@@ -12,6 +14,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   bundles a newer SQLite without the bug. `tests/worker.test.mjs`'s pre-migration-0015 fixture
   exercises exactly this by dropping the column to simulate an older database. No migration or
   runtime code changed — `schema.sql` is fresh-install-only and every query names its columns.
+  v1.0.0's CI run failed on this; v1.0.1 is the first release with a green Linux CI run and is the
+  one to deploy.
 
 ## [1.0.0] - 2026-09-18
 
